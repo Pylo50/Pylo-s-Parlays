@@ -11,11 +11,6 @@ BASE_URL = "https://api.the-odds-api.com/v4/sports"
 
 conn = st.connection("gsheets", type=GSheetsConnection)
 
-def american_to_decimal(american: float) -> float:
-    if american > 0:
-        return (american / 100.0) + 1.0
-    return (100.0 / abs(american)) + 1.0
-
 def decimal_to_american(decimal_odds: float) -> str:
     if decimal_odds >= 2.0:
         val = int(round((decimal_odds - 1.0) * 100))
@@ -47,9 +42,9 @@ def fetch_odds_cached(sport_key: str, market_key: str, regions: str = "us"):
 st.sidebar.title("Odds Scanner")
 
 sport_options = {
+    "MLB": "baseball_mlb",
     "NFL": "americanfootball_nfl",
     "NCAAF": "americanfootball_ncaaf",
-    "MLB": "baseball_mlb",
     "NBA": "basketball_nba",
     "WNBA": "basketball_wnba",
     "NHL": "icehockey_nhl",
@@ -72,7 +67,7 @@ st.sidebar.markdown("---")
 st.sidebar.subheader("Bankroll & Sizing")
 total_bankroll = st.sidebar.number_input("Total Bankroll ($)", min_value=10.0, value=1000.0, step=50.0)
 kelly_fraction = st.sidebar.slider("Kelly Fraction", min_value=0.05, max_value=1.0, value=0.25, step=0.05)
-min_ev = st.sidebar.slider("Minimum +EV %", min_value=0.0, max_value=15.0, value=1.0, step=0.5)
+min_ev = st.sidebar.slider("Minimum +EV %", min_value=0.0, max_value=15.0, value=0.5, step=0.25)
 
 scan_clicked = st.sidebar.button("Scan Odds (Cost: 1 Credit)", type="primary")
 
@@ -107,9 +102,12 @@ if st.session_state.events_data:
         event_name = f"{event.get('away_team')} @ {event.get('home_team')}"
         commence_time = event.get("commence_time")
         bookmakers = event.get("bookmakers", [])
+        if not bookmakers:
+            continue
 
-        benchmark_books = [b for b in bookmakers if b["key"].lower() in ["pinnacle", "pinnaclesports"]]
-        reference_book = benchmark_books[0] if benchmark_books else None
+        # Step 1: Collect fair probabilities across books for this market
+        market_devigged_probs = {}
+        book_offers = []
 
         for bm in bookmakers:
             book_title = bm.get("title")
@@ -117,52 +115,66 @@ if st.session_state.events_data:
                 if market.get("key") != market_key:
                     continue
 
-                for outcome in market.get("outcomes", []):
-                    target_name = outcome.get("name")
-                    point = outcome.get("point", None)
-                    offered_dec = outcome.get("price")
+                outcomes = market.get("outcomes", [])
+                if len(outcomes) < 2:
+                    continue
 
-                    ref_dec = None
-                    if reference_book:
-                        for ref_market in reference_book.get("markets", []):
-                            if ref_market.get("key") == market_key:
-                                for ref_outcome in ref_market.get("outcomes", []):
-                                    if ref_outcome.get("name") == target_name:
-                                        if point is None or ref_outcome.get("point") == point:
-                                            ref_dec = ref_outcome.get("price")
+                # Strip vig for this specific book
+                raw_implied = {o["name"]: 1.0 / o["price"] for o in outcomes if o.get("price", 0) > 1.0}
+                total_vig = sum(raw_implied.values())
+                if total_vig <= 0:
+                    continue
 
-                    fair_prob = None
-                    if ref_dec and ref_dec > 1.0:
-                        fair_prob = (1.0 / ref_dec) * 1.025
-                    elif offered_dec > 1.0:
-                        continue
+                for o in outcomes:
+                    pt = o.get("point", None)
+                    lbl = o["name"] + (f" ({'+' if pt > 0 else ''}{pt})" if pt is not None else "")
+                    fair_p = raw_implied[o["name"]] / total_vig
+                    market_devigged_probs.setdefault(lbl, []).append(fair_p)
 
-                    if fair_prob and 0.0 < fair_prob < 1.0:
-                        ev_pct = ((offered_dec * fair_prob) - 1.0) * 100.0
-                        if ev_pct >= min_ev:
-                            rec_stake_pct = calculate_kelly(fair_prob, offered_dec, fraction=kelly_fraction)
-                            rec_stake_dollars = round(rec_stake_pct * total_bankroll, 2)
+                    book_offers.append({
+                        "book": book_title,
+                        "bet": lbl,
+                        "dec_odds": o["price"],
+                        "event": event_name,
+                        "time": commence_time
+                    })
 
-                            target_label = target_name
-                            if point is not None:
-                                sign = "+" if point > 0 else ""
-                                target_label += f" ({sign}{point})"
+        # Step 2: Compute consensus fair probability per outcome
+        consensus_probs = {
+            bet: sum(probs) / len(probs)
+            for bet, probs in market_devigged_probs.items()
+            if len(probs) >= 2  # Requires at least 2 books to establish consensus
+        }
 
-                            opportunities.append({
-                                "Time": commence_time,
-                                "Matchup": event_name,
-                                "Bet": target_label,
-                                "Sportsbook": book_title,
-                                "Odds (Dec)": round(offered_dec, 3),
-                                "Odds (US)": decimal_to_american(offered_dec),
-                                "Fair Prob %": round(fair_prob * 100, 2),
-                                "+EV %": round(ev_pct, 2),
-                                "Rec Stake ($)": rec_stake_dollars,
-                            })
+        # Step 3: Compare retail books against consensus
+        for offer in book_offers:
+            bet_name = offer["bet"]
+            if bet_name not in consensus_probs:
+                continue
+
+            fair_prob = consensus_probs[bet_name]
+            offered_dec = offer["dec_odds"]
+            ev_pct = ((offered_dec * fair_prob) - 1.0) * 100.0
+
+            if ev_pct >= min_ev:
+                rec_stake_pct = calculate_kelly(fair_prob, offered_dec, fraction=kelly_fraction)
+                rec_stake_dollars = round(rec_stake_pct * total_bankroll, 2)
+
+                opportunities.append({
+                    "Time": offer["time"][:16].replace("T", " "),
+                    "Matchup": offer["event"],
+                    "Bet": bet_name,
+                    "Sportsbook": offer["book"],
+                    "Odds (US)": decimal_to_american(offered_dec),
+                    "Odds (Dec)": round(offered_dec, 2),
+                    "Consensus Prob": f"{round(fair_prob * 100, 1)}%",
+                    "+EV %": round(ev_pct, 2),
+                    "Rec Stake ($)": rec_stake_dollars,
+                })
 
     if opportunities:
         df_opps = pd.DataFrame(opportunities).sort_values(by="+EV %", ascending=False)
-        st.subheader(f"Found {len(df_opps)} Opportunities Matching Criteria")
+        st.subheader(f"Found {len(df_opps)} Opportunities")
         st.dataframe(df_opps, use_container_width=True)
 
         st.markdown("---")
@@ -178,11 +190,11 @@ if st.session_state.events_data:
             selected_book = c3.selectbox("Bookmaker", subset[subset["Bet"] == selected_bet]["Sportsbook"].unique())
             
             c4, c5, c6 = st.columns(3)
-            logged_odds = c4.text_input("Odds Taken (US)", value=row_data["Odds (US)"])
-            logged_stake = c5.number_input("Actual Stake ($)", min_value=1.0, value=float(row_data["Rec Stake ($)"]))
+            logged_odds = c4.text_input("Odds Taken (US)", value=str(row_data["Odds (US)"]))
+            logged_stake = c5.number_input("Actual Stake ($)", min_value=1.0, value=float(max(1.0, row_data["Rec Stake ($)"])))
             bet_status = c6.selectbox("Status", ["Open", "Won", "Lost", "Push"])
 
-            notes = st.text_input("Notes (optional)", value=f"+EV {row_data['+EV %']}% | Fair: {row_data['Fair Prob %']}%")
+            notes = st.text_input("Notes (optional)", value=f"+EV: {row_data['+EV %']}% | Fair: {row_data['Consensus Prob']}")
             submit_bet = st.form_submit_button("Record to Google Sheets")
 
             if submit_bet:
@@ -206,7 +218,7 @@ if st.session_state.events_data:
                 except Exception as e:
                     st.error(f"Error logging to Google Sheets: {e}")
     else:
-        st.info("No bets currently meet the minimum +EV threshold. Adjust the slider or trigger a new sport/market scan.")
+        st.info("No bets currently meet the minimum +EV threshold. Try setting Min +EV to 0.0 or scanning another market.")
 else:
     st.info("Select a sport and market in the sidebar, then click 'Scan Odds' to retrieve live lines.")
 
