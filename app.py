@@ -182,7 +182,6 @@ def calculate_kelly(fair_p: float, dec: float, fraction: float = 0.25) -> float:
 # --- 100% FREE MLB STATS API (PITCHERS) ---
 @st.cache_data(ttl=3600, show_spinner=False)
 def fetch_mlb_probable_pitchers(date_str: str):
-    """Fetches officially posted probable pitchers from MLB Stats API at zero token cost."""
     try:
         url = f"https://statsapi.mlb.com/api/v1/schedule?sportId=1&date={date_str}&hydrate=probablePitcher"
         res = requests.get(url, timeout=8).json()
@@ -193,7 +192,6 @@ def fetch_mlb_probable_pitchers(date_str: str):
                 home = game.get("teams", {}).get("home", {})
                 away_team = away.get("team", {}).get("name", "")
                 home_team = home.get("team", {}).get("name", "")
-                
                 away_pitcher = away.get("probablePitcher", {}).get("fullName", "TBD")
                 home_pitcher = home.get("probablePitcher", {}).get("fullName", "TBD")
                 pitcher_map[f"{away_team} @ {home_team}"] = f"{away_pitcher} vs {home_pitcher}"
@@ -201,7 +199,6 @@ def fetch_mlb_probable_pitchers(date_str: str):
     except Exception:
         return {}
 
-# Free Events List
 @st.cache_data(ttl=3600, show_spinner=False)
 def get_upcoming_events(sport_key: str):
     url = f"{BASE_URL}/{sport_key}/events"
@@ -236,25 +233,24 @@ def fetch_game_props(sport_key: str, event_id: str, markets_csv: str):
     return res.json(), res.headers.get("x-requests-remaining", "N/A"), res.headers.get("x-requests-used", "N/A")
 
 def generate_rationale(pick_name: str, matchup: str, win_prob: float, ev_pct: float, odds_us: str, pitchers: str = "") -> str:
-    """Generates the handicapping narrative explaining why the system selected this play."""
     team = pick_name.split("(")[0].strip()
-    pitcher_info = f" Matchup context: **{pitchers}**." if pitchers and pitchers != "TBD vs TBD" else ""
+    pitcher_info = f" Matchup context: <b>{pitchers}</b>." if pitchers and pitchers != "TBD vs TBD" else ""
     
     if win_prob >= 63.0:
         if ev_pct >= 0:
-            return f"**High-Conviction Edge**: Market consensus gives {team} an overwhelming **{win_prob:.1f}% chance** to cash. PlayNow has miscalculated the line relative to sharp offshore benchmarks, giving you a rare **+{ev_pct:.2f}% mathematical edge**.{pitcher_info}"
+            return f"<b>High-Conviction Edge</b>: Market consensus gives {team} an overwhelming <b>{win_prob:.1f}% chance</b> to cash. PlayNow has miscalculated the line relative to sharp offshore benchmarks, giving you a rare <b>+{ev_pct:.2f}% mathematical edge</b>.{pitcher_info}"
         else:
-            return f"**Heavy Slate Anchor**: {team} is backed by a commanding **{win_prob:.1f}% win probability**. While the book holds a small {abs(ev_pct):.2f}% commission, PlayNow's price ({odds_us}) is priced with low juice compared to typical retail vig. Excellent parlay leg or straight bet.{pitcher_info}"
+            return f"<b>Heavy Slate Anchor</b>: {team} is backed by a commanding <b>{win_prob:.1f}% win probability</b>. While the book holds a small {abs(ev_pct):.2f}% commission, PlayNow's price ({odds_us}) is priced with low juice compared to typical retail vig. Excellent parlay leg or straight bet.{pitcher_info}"
     elif win_prob >= 54.0:
         if ev_pct >= 0:
-            return f"**Sharp Value Pick**: {team} holds a decisive **{win_prob:.1f}% win projection**. PlayNow's payout is lagging behind sharp syndicate moves, locking in a favorable **+{ev_pct:.2f}% edge**.{pitcher_info}"
+            return f"<b>Sharp Value Pick</b>: {team} holds a decisive <b>{win_prob:.1f}% win projection</b>. PlayNow's payout is lagging behind sharp syndicate moves, locking in a favorable <b>+{ev_pct:.2f}% edge</b>.{pitcher_info}"
         else:
-            return f"**Solid High-Floor Favorite**: Market consensus leans noticeably toward {team} (**{win_prob:.1f}% win probability**). The price reflects honest fair value without predatory retail markups.{pitcher_info}"
+            return f"<b>Solid High-Floor Favorite</b>: Market consensus leans noticeably toward {team} (<b>{win_prob:.1f}% win probability</b>). The price reflects honest fair value without predatory retail markups.{pitcher_info}"
     else:
         if ev_pct >= 0:
-            return f"**Live Value Play**: A near coin-flip where {team} holds a **{win_prob:.1f}% win rate**, but PlayNow is paying significantly higher than true fair probability (+{ev_pct:.2f}% EV).{pitcher_info}"
+            return f"<b>Live Value Play</b>: A near coin-flip where {team} holds a <b>{win_prob:.1f}% win rate</b>, but PlayNow is paying significantly higher than true fair probability (+{ev_pct:.2f}% EV).{pitcher_info}"
         else:
-            return f"**Competitive Coin-Flip**: Sharp models price this tight with {team} at **{win_prob:.1f}%**. Strong candidate for spread insurance (+1.5) or small straight action.{pitcher_info}"
+            return f"<b>Competitive Coin-Flip</b>: Sharp models price this tight with {team} at <b>{win_prob:.1f}%</b>. Strong candidate for spread insurance (+1.5) or small straight action.{pitcher_info}"
 
 SPORTS_PRESETS = {
     "⚾ MLB Baseball": {
@@ -463,9 +459,7 @@ if run_scan:
                 formatted_time = dt.strftime("%b %d - %I:%M %p")
                 bookmakers = ev.get("bookmakers", [])
 
-                # Match Pitcher Names
                 pitcher_str = pitcher_data.get(matchup, "")
-
                 market_probs = {}
                 playnow_wagers = []
 
@@ -566,44 +560,45 @@ with tab_singles:
             badge_style = "background: rgba(16, 185, 129, 0.15); color: #10b981; border: 1px solid #10b981;" if row['ev'] >= 0 else "background: rgba(56, 189, 248, 0.15); color: #38bdf8; border: 1px solid #0284c7;"
             badge_text = f"+{row['ev']}% EDGE" if row['ev'] >= 0 else f"{row['ev']}% HOLD"
 
-            pitcher_html = f"<div class='pitcher-tag'>⚾ Probables: {row['pitchers']}</div>" if row['pitchers'] else ""
-            rationale_html = generate_rationale(row['pick'], row['matchup'], row['fair_prob_num'], row['ev'], row['playnow_us'], row['pitchers'])
+            pitcher_html = f"<div class='pitcher-tag'>⚾ Probables: {row['pitchers']}</div>" if row.get('pitchers') else ""
+            rationale_html = generate_rationale(row['pick'], row['matchup'], row['fair_prob_num'], row['ev'], row['playnow_us'], row.get('pitchers', ''))
 
-            st.markdown(f"""
-            <div class="wager-card">
-                <div class="card-top">
-                    <div>
-                        <span class="source-tag">PLAYNOW SK</span>
-                        <span style="font-size: 11px; color: #64748b; margin-left: 8px; font-family: 'JetBrains Mono';">{row['time']} SK</span>
-                    </div>
-                    <div class="edge-badge" style="{badge_style}">{badge_text}</div>
-                </div>
-                <div class="match-label">{row['matchup']}</div>
-                {pitcher_html}
-                <div class="selection-label">{row['pick']}</div>
-                <div class="odds-terminal">
-                    <div>
-                        <div class="terminal-lbl">PlayNow Odds</div>
-                        <div class="terminal-data" style="color:#10b981;">{row['playnow_us']}</div>
-                    </div>
-                    <div>
-                        <div class="terminal-lbl">Sharp Fair</div>
-                        <div class="terminal-data">{row['fair_us']}</div>
-                    </div>
-                    <div>
-                        <div class="terminal-lbl">Win Prob</div>
-                        <div class="terminal-data" style="color:#38bdf8;">{row['fair_prob']}</div>
-                    </div>
-                    <div>
-                        <div class="terminal-lbl">Suggested Bet</div>
-                        <div class="terminal-data" style="color:#f59e0b;">${row['stake']}</div>
-                    </div>
-                </div>
-                <div class="rationale-box">
-                    💡 <b>Why the System Likes This:</b> {rationale_html}
-                </div>
-            </div>
-            """, unsafe_allow_html=True)
+            # Strictly unindented HTML block to prevent Markdown code box parsing
+            card_html = f"""<div class="wager-card">
+<div class="card-top">
+<div>
+<span class="source-tag">PLAYNOW SK</span>
+<span style="font-size: 11px; color: #64748b; margin-left: 8px; font-family: 'JetBrains Mono';">{row['time']} SK</span>
+</div>
+<div class="edge-badge" style="{badge_style}">{badge_text}</div>
+</div>
+<div class="match-label">{row['matchup']}</div>
+{pitcher_html}
+<div class="selection-label">{row['pick']}</div>
+<div class="odds-terminal">
+<div>
+<div class="terminal-lbl">PlayNow Odds</div>
+<div class="terminal-data" style="color:#10b981;">{row['playnow_us']}</div>
+</div>
+<div>
+<div class="terminal-lbl">Sharp Fair</div>
+<div class="terminal-data">{row['fair_us']}</div>
+</div>
+<div>
+<div class="terminal-lbl">Win Prob</div>
+<div class="terminal-data" style="color:#38bdf8;">{row['fair_prob']}</div>
+</div>
+<div>
+<div class="terminal-lbl">Suggested Bet</div>
+<div class="terminal-data" style="color:#f59e0b;">${row['stake']}</div>
+</div>
+</div>
+<div class="rationale-box">
+💡 <b>Why the System Likes This:</b> {rationale_html}
+</div>
+</div>"""
+
+            st.markdown(card_html, unsafe_allow_html=True)
 
         # 1-Tap Google Sheets Logger
         st.markdown("---")
@@ -649,7 +644,6 @@ with tab_parlays:
         selected_legs = st.multiselect("Select Parlay Legs (2 to 4)", options=parlay_choices, default=parlay_choices[:2])
 
         if len(selected_legs) >= 2:
-            # Mathematical Parlay compounding
             indices = [parlay_choices.index(choice) for choice in selected_legs]
             chosen_data = [st.session_state.opps[i] for i in indices]
 
@@ -663,35 +657,35 @@ with tab_parlays:
             parlay_us = decimal_to_american(total_decimal_odds)
             parlay_win_prob_pct = round(joint_prob * 100.0, 1)
 
-            st.markdown(f"""
-            <div class="wager-card" style="border: 2px solid #38bdf8;">
-                <div class="card-top">
-                    <div>
-                        <span class="source-tag" style="background-color: #38bdf8; color: #021a2e;">PARLAY TICKET</span>
-                        <span style="font-size: 11px; color: #64748b; margin-left: 8px;">{len(selected_legs)} LEGS COMBINED</span>
-                    </div>
-                </div>
-                <div class="selection-label">Multi-Leg Parlay ({parlay_us})</div>
-                <div class="odds-terminal">
-                    <div>
-                        <div class="terminal-lbl">Combined Odds</div>
-                        <div class="terminal-data" style="color:#10b981;">{parlay_us} ({total_decimal_odds:.2f})</div>
-                    </div>
-                    <div>
-                        <div class="terminal-lbl">Joint Win Prob</div>
-                        <div class="terminal-data" style="color:#38bdf8;">{parlay_win_prob_pct}%</div>
-                    </div>
-                    <div>
-                        <div class="terminal-lbl">Estimated Payout ($10)</div>
-                        <div class="terminal-data" style="color:#f59e0b;">${round(10 * total_decimal_odds, 2)}</div>
-                    </div>
-                    <div>
-                        <div class="terminal-lbl">Suggested Bet</div>
-                        <div class="terminal-data" style="color:#f59e0b;">$10.00</div>
-                    </div>
-                </div>
-            </div>
-            """, unsafe_allow_html=True)
+            parlay_card_html = f"""<div class="wager-card" style="border: 2px solid #38bdf8;">
+<div class="card-top">
+<div>
+<span class="source-tag" style="background-color: #38bdf8; color: #021a2e;">PARLAY TICKET</span>
+<span style="font-size: 11px; color: #64748b; margin-left: 8px;">{len(selected_legs)} LEGS COMBINED</span>
+</div>
+</div>
+<div class="selection-label">Multi-Leg Parlay ({parlay_us})</div>
+<div class="odds-terminal">
+<div>
+<div class="terminal-lbl">Combined Odds</div>
+<div class="terminal-data" style="color:#10b981;">{parlay_us} ({total_decimal_odds:.2f})</div>
+</div>
+<div>
+<div class="terminal-lbl">Joint Win Prob</div>
+<div class="terminal-data" style="color:#38bdf8;">{parlay_win_prob_pct}%</div>
+</div>
+<div>
+<div class="terminal-lbl">Estimated Payout ($10)</div>
+<div class="terminal-data" style="color:#f59e0b;">${round(10 * total_decimal_odds, 2)}</div>
+</div>
+<div>
+<div class="terminal-lbl">Suggested Bet</div>
+<div class="terminal-data" style="color:#f59e0b;">$10.00</div>
+</div>
+</div>
+</div>"""
+
+            st.markdown(parlay_card_html, unsafe_allow_html=True)
 
             with st.form("parlay_log_form"):
                 p_stake = st.number_input("Wager Amount ($ CAD)", min_value=1.0, value=10.0, step=5.0)
