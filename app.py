@@ -2,105 +2,175 @@ import streamlit as st
 from streamlit_gsheets import GSheetsConnection
 import requests
 import pandas as pd
-from datetime import datetime
+from datetime import datetime, timezone
 
+# --- PAGE CONFIG ---
 st.set_page_config(
-    page_title="Pylos Parlays | Morning Scanner",
+    page_title="Pylos Parlays | Sharp SK Terminal",
     page_icon="⚡",
     layout="wide",
     initial_sidebar_state="expanded"
 )
 
-# Custom High-End Cyber UI
+# --- BESPOKE RETRO-CYBER DARK UI ---
 st.markdown("""
 <style>
-    @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@500;700;800&family=Plus+Jakarta+Sans:wght@500;700;800&display=swap');
-    
+    @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600;700;800&family=Plus+Jakarta+Sans:wght@500;700;800&display=swap');
+
     html, body, [class*="css"] {
-        font-family: 'Plus Jakarta Sans', sans-serif;
+        font-family: 'Plus Jakarta Sans', -apple-system, BlinkMacSystemFont, sans-serif;
     }
+
+    /* Main App Background */
     .stApp {
-        background-color: #080c14;
-        color: #e2e8f0;
+        background: radial-gradient(circle at 15% 15%, #0f172a 0%, #070a12 85%);
+        color: #f1f5f9;
     }
-    .metric-card {
-        background: linear-gradient(180deg, #111827 0%, #0b0f19 100%);
-        border: 1px solid #1f2937;
+
+    /* Sidebar Styling */
+    section[data-testid="stSidebar"] {
+        background-color: #0b0f19 !important;
+        border-right: 1px solid #1e293b;
+    }
+
+    /* Header Accent Title */
+    .terminal-title {
+        font-family: 'Plus Jakarta Sans', sans-serif;
+        font-weight: 800;
+        font-size: 28px;
+        letter-spacing: -0.5px;
+        color: #ffffff;
+        margin-bottom: 0px;
+    }
+    .accent-pill {
+        background: linear-gradient(135deg, #10b981 0%, #059669 100%);
+        color: #ffffff;
+        font-size: 13px;
+        font-weight: 800;
+        padding: 3px 10px;
+        border-radius: 6px;
+        display: inline-block;
+        box-shadow: 0 0 12px rgba(16, 185, 129, 0.35);
+        vertical-align: middle;
+        margin-left: 6px;
+    }
+    .terminal-sub {
+        color: #94a3b8;
+        font-size: 13px;
+        font-family: 'JetBrains Mono', monospace;
+        margin-top: 4px;
+        margin-bottom: 18px;
+    }
+
+    /* Metric Stat Cubes */
+    .metric-grid {
+        display: grid;
+        grid-template-columns: repeat(2, 1fr);
+        gap: 12px;
+        margin-bottom: 20px;
+    }
+    .stat-cube {
+        background: rgba(15, 23, 42, 0.7);
+        border: 1px solid #1e293b;
         border-radius: 12px;
-        padding: 12px 16px;
+        padding: 12px;
         text-align: center;
-        box-shadow: 0 4px 15px rgba(0,0,0,0.4);
+        box-shadow: 0 4px 14px rgba(0, 0, 0, 0.4);
+        backdrop-filter: blur(10px);
     }
-    .metric-num {
+    .stat-cube-val {
         font-family: 'JetBrains Mono', monospace;
         font-size: 24px;
         font-weight: 800;
         color: #38bdf8;
     }
-    .metric-tag {
+    .stat-cube-lbl {
         font-size: 11px;
-        letter-spacing: 1px;
-        color: #64748b;
         text-transform: uppercase;
+        letter-spacing: 0.8px;
+        color: #64748b;
+        margin-top: 2px;
     }
-    .prop-card {
-        background: #0f172a;
+
+    /* Opportunity Cards */
+    .wager-card {
+        background: linear-gradient(145deg, rgba(15, 23, 42, 0.9) 0%, rgba(11, 15, 25, 0.95) 100%);
         border: 1px solid #10b981;
-        border-radius: 12px;
-        padding: 14px 18px;
-        margin-bottom: 12px;
-        box-shadow: 0 0 12px rgba(16, 185, 129, 0.15);
+        border-radius: 14px;
+        padding: 18px;
+        margin-bottom: 14px;
+        box-shadow: 0 0 18px rgba(16, 185, 129, 0.15);
+        transition: transform 0.15s ease-in-out;
     }
-    .prop-header {
+    .card-top {
         display: flex;
         justify-content: space-between;
         align-items: center;
         margin-bottom: 8px;
     }
-    .player-name {
-        font-size: 17px;
-        font-weight: 800;
-        color: #f8fafc;
-    }
-    .badge-playnow {
-        background: #059669;
-        color: #ffffff;
-        padding: 3px 9px;
-        border-radius: 6px;
-        font-size: 11px;
-        font-weight: 800;
-    }
-    .badge-edge {
-        background: rgba(56, 189, 248, 0.15);
-        color: #38bdf8;
-        border: 1px solid #38bdf8;
-        padding: 3px 8px;
-        border-radius: 6px;
+    .source-tag {
+        background-color: #10b981;
+        color: #041f13;
         font-family: 'JetBrains Mono', monospace;
-        font-size: 12px;
-        font-weight: 700;
+        font-weight: 800;
+        font-size: 11px;
+        padding: 3px 8px;
+        border-radius: 4px;
+        letter-spacing: 0.5px;
     }
-    .odds-matrix {
+    .edge-badge {
+        background: rgba(56, 189, 248, 0.12);
+        color: #38bdf8;
+        border: 1px solid #0284c7;
+        font-family: 'JetBrains Mono', monospace;
+        font-weight: 800;
+        font-size: 13px;
+        padding: 4px 10px;
+        border-radius: 6px;
+    }
+    .match-label {
+        font-size: 14px;
+        color: #94a3b8;
+        margin-bottom: 2px;
+    }
+    .selection-label {
+        font-size: 19px;
+        font-weight: 800;
+        color: #ffffff;
+        letter-spacing: -0.3px;
+        margin-bottom: 12px;
+    }
+
+    /* 4-Column Terminal Odds Display */
+    .odds-terminal {
         display: grid;
         grid-template-columns: repeat(4, 1fr);
-        gap: 6px;
-        background: #090d16;
+        gap: 8px;
+        background: #070a12;
         border: 1px solid #1e293b;
-        padding: 8px;
         border-radius: 8px;
-        margin-top: 10px;
+        padding: 10px;
         text-align: center;
     }
-    .matrix-title {
+    .terminal-lbl {
         font-size: 10px;
-        color: #64748b;
         text-transform: uppercase;
+        letter-spacing: 0.5px;
+        color: #64748b;
     }
-    .matrix-val {
+    .terminal-data {
         font-family: 'JetBrains Mono', monospace;
-        font-size: 13px;
+        font-size: 14px;
         font-weight: 700;
-        color: #f1f5f9;
+        margin-top: 3px;
+    }
+
+    /* Quick Logger Box */
+    div[data-testid="stForm"] {
+        background: rgba(15, 23, 42, 0.6);
+        border: 1px solid #1e293b;
+        border-radius: 12px;
+        padding: 16px;
     }
 </style>
 """, unsafe_allow_html=True)
@@ -119,7 +189,7 @@ def calculate_kelly(fair_p: float, dec: float, fraction: float = 0.25) -> float:
     q = 1.0 - fair_p
     return max(0.0, ((b * fair_p - q) / b) * fraction)
 
-# Zero Credit Cost fixture fetcher
+# Zero Credit Cost: browse schedules for free
 @st.cache_data(ttl=3600, show_spinner=False)
 def get_upcoming_events(sport_key: str):
     url = f"{BASE_URL}/{sport_key}/events"
@@ -127,14 +197,14 @@ def get_upcoming_events(sport_key: str):
     res.raise_for_status()
     return res.json()
 
-# Cache 45 mins to preserve quota
+# 45-min cache to preserve quota
 @st.cache_data(ttl=2700, show_spinner=False)
-def fetch_mainline_slate(sport_key: str, market_str: str):
+def fetch_mainlines(sport_key: str, markets_str: str):
     url = f"{BASE_URL}/{sport_key}/odds"
     params = {
         "apiKey": ODDS_API_KEY,
         "regions": "ca,eu",
-        "markets": market_str,
+        "markets": markets_str,
         "oddsFormat": "decimal",
     }
     res = requests.get(url, params=params, timeout=12)
@@ -142,7 +212,7 @@ def fetch_mainline_slate(sport_key: str, market_str: str):
     return res.json(), res.headers.get("x-requests-remaining", "N/A"), res.headers.get("x-requests-used", "N/A")
 
 @st.cache_data(ttl=2700, show_spinner=False)
-def fetch_props_for_game(sport_key: str, event_id: str, markets_csv: str):
+def fetch_game_props(sport_key: str, event_id: str, markets_csv: str):
     url = f"{BASE_URL}/{sport_key}/events/{event_id}/odds"
     params = {
         "apiKey": ODDS_API_KEY,
@@ -154,22 +224,15 @@ def fetch_props_for_game(sport_key: str, event_id: str, markets_csv: str):
     res.raise_for_status()
     return res.json(), res.headers.get("x-requests-remaining", "N/A"), res.headers.get("x-requests-used", "N/A")
 
-# --- USER'S HARDCODED PROP CONFIGURATION ---
-SPORTS_CFG = {
-    "🏈 NFL Football": {
-        "key": "americanfootball_nfl",
-        "props": [
-            "player_pass_yds", "player_pass_completions", "player_pass_attempts", 
-            "player_rush_yds", "player_receptions", "player_reception_yds", "player_anytime_td"
-        ]
-    },
-    "🏈 NCAAF Football": {
-        "key": "americanfootball_ncaaf",
-        "props": ["player_pass_yds", "player_rush_yds", "player_reception_yds", "player_anytime_td"]
-    },
+# --- SPORT CONFIGURATIONS ---
+SPORTS_PRESETS = {
     "⚾ MLB Baseball": {
         "key": "baseball_mlb",
         "props": ["pitcher_strikeouts", "batter_hits", "batter_total_bases", "batter_home_runs", "batter_rbis"]
+    },
+    "🏈 NFL Football": {
+        "key": "americanfootball_nfl",
+        "props": ["player_pass_yds", "player_pass_completions", "player_rush_yds", "player_reception_yds", "player_anytime_td"]
     },
     "🏀 NBA Basketball": {
         "key": "basketball_nba",
@@ -181,200 +244,235 @@ SPORTS_CFG = {
     }
 }
 
-st.sidebar.markdown("### ⚡ Pylos Parlays")
-selected_sport = st.sidebar.selectbox("Sport", list(SPORTS_CFG.keys()))
-sport_info = SPORTS_CFG[selected_sport]
+# --- SIDEBAR CONTROLS ---
+st.sidebar.markdown("<h3 style='margin-bottom:0px; color:#fff;'>⚡ PYLOS TERMINAL</h3>", unsafe_allow_html=True)
+st.sidebar.caption("Benchmark: **Pinnacle** | Target: **PlayNow SK**")
+
+selected_sport_label = st.sidebar.selectbox("Sport Slate", list(SPORTS_PRESETS.keys()))
+sport_info = SPORTS_PRESETS[selected_sport_label]
 sport_key = sport_info["key"]
 
-mode = st.sidebar.radio(
-    "Morning Mode", 
-    ["📊 All Games (Mainlines)", "🎯 Game Prop Sniper (Token Safe)"]
-)
+scan_mode = st.sidebar.radio("Scan Mode", ["📊 All Games (Mainlines)", "🎯 Prop Sniper (Token Safe)"])
 
 target_event_id = None
-target_game_lbl = ""
-markets_to_request = ""
-calc_cost = 2
+target_game_name = ""
+queried_markets = ""
+credit_cost = 2
 
-if mode == "📊 All Games (Mainlines)":
-    m_choice = st.sidebar.multiselect("Mainline Markets", ["h2h (Moneyline)", "spreads", "totals"], default=["h2h (Moneyline)", "spreads", "totals"])
-    if not m_choice:
+if scan_mode == "📊 All Games (Mainlines)":
+    main_selection = st.sidebar.multiselect("Markets", ["h2h (Moneyline)", "spreads", "totals"], default=["h2h (Moneyline)", "spreads", "totals"])
+    if not main_selection:
         st.stop()
-    clean_keys = [m.split(" ")[0] for m in m_choice]
-    markets_to_request = ",".join(clean_keys)
-    calc_cost = len(clean_keys) * 2
+    clean_keys = [m.split(" ")[0] for m in main_selection]
+    queried_markets = ",".join(clean_keys)
+    credit_cost = len(clean_keys) * 2
 else:
     try:
         events = get_upcoming_events(sport_key)
         if events:
-            ev_map = {f"{e['away_team']} @ {e['home_team']}": e['id'] for e in events}
-            target_game_lbl = st.sidebar.selectbox("Select Matchup", list(ev_map.keys()))
-            target_event_id = ev_map[target_game_lbl]
+            now_utc = datetime.now(timezone.utc)
+            # Filter out games that have already started from the dropdown
+            future_events = [e for e in events if datetime.fromisoformat(e['commence_time'].replace("Z", "+00:00")) > now_utc]
             
-            # Pre-select user's entire prop wishlist
-            chosen_props = st.sidebar.multiselect(
-                "Props for This Matchup", 
-                options=sport_info["props"], 
-                default=sport_info["props"][:3],
-                help="Add or remove prop types to tune credit cost."
-            )
-            if not chosen_props:
-                st.sidebar.warning("Select at least 1 prop type.")
-                st.stop()
-            markets_to_request = ",".join(chosen_props)
-            calc_cost = len(chosen_props) * 2
+            if future_events:
+                ev_options = {f"{e['away_team']} @ {e['home_team']} ({e['commence_time'][11:16]} UTC)": e['id'] for e in future_events}
+                target_game_name = st.sidebar.selectbox("Select Upcoming Game", list(ev_options.keys()))
+                target_event_id = ev_options[target_game_name]
+
+                selected_props = st.sidebar.multiselect(
+                    "Prop Markets",
+                    options=sport_info["props"],
+                    default=sport_info["props"][:3]
+                )
+                if not selected_props:
+                    st.sidebar.warning("Choose at least 1 prop type.")
+                    st.stop()
+                queried_markets = ",".join(selected_props)
+                credit_cost = len(selected_props) * 2
+            else:
+                st.sidebar.info("No upcoming games left today on the board.")
         else:
-            st.sidebar.info("No games listed currently.")
-    except Exception as err:
-        st.sidebar.error(f"Event fetch error: {err}")
+            st.sidebar.info("No games listed.")
+    except Exception as e:
+        st.sidebar.error(f"Event error: {e}")
 
 st.sidebar.markdown("---")
+st.sidebar.markdown("**Math & Bankroll Filters**")
 bankroll = st.sidebar.number_input("Bankroll ($ CAD)", min_value=10.0, value=1000.0, step=50.0)
-kelly_fraction = st.sidebar.slider("Kelly Fraction", 0.05, 0.50, 0.25, step=0.05)
-min_ev_threshold = st.sidebar.slider("Min Edge (+EV %)", 0.0, 10.0, 0.5, step=0.25)
 
-scan_btn = st.sidebar.button(f"⚡ Scan Odds (~{calc_cost} Credits)", type="primary")
+# 40% Default Win Probability Slider
+min_win_prob = st.sidebar.slider(
+    "Min Win Probability %", 
+    min_value=15, 
+    max_value=65, 
+    value=40, 
+    step=5,
+    help="Default 40% filters out deep longshots (like 14% underdogs) while capturing realistic live underdogs."
+)
 
-# --- HEADER SECTION ---
-st.markdown("<h2 style='font-weight: 800; letter-spacing: -0.5px;'>⚡ PYLOS PARLAYS <span style='color:#10b981;'>SK</span></h2>", unsafe_allow_html=True)
-st.markdown("<p style='color: #94a3b8; font-size: 13px; margin-top: -10px;'>Pinnacle Fair Price Devig Engine ➔ PlayNow SK Value Scanner</p>", unsafe_allow_html=True)
+min_edge = st.sidebar.slider("Min Edge (+EV %)", 0.0, 10.0, 0.5, step=0.25)
+kelly_fraction = st.sidebar.slider("Kelly Fraction", 0.05, 0.50, 0.25, step=0.05, help="0.25 = Quarter Kelly sizing")
+
+run_scan = st.sidebar.button(f"⚡ Scan Odds (~{credit_cost} Credits)", type="primary")
+
+# --- MAIN VIEWPORT ---
+st.markdown("<div class='terminal-title'>⚡ PYLOS PARLAYS <span class='accent-pill'>PLAYNOW SK</span></div>", unsafe_allow_html=True)
+st.markdown("<div class='terminal-sub'>PINNACLE SHARP DEVIG ➔ SASKATCHEWAN VALUE TERMINAL</div>", unsafe_allow_html=True)
 
 if "api_rem" not in st.session_state:
     st.session_state.api_rem = "---"
     st.session_state.api_used = "---"
-    st.session_state.opp_cards = []
+    st.session_state.opps = []
 
-c1, c2 = st.columns(2)
-with c1:
-    st.markdown(f"""<div class='metric-card'><div class='metric-tag'>Calls Remaining</div><div class='metric-num'>{st.session_state.api_rem}</div></div>""", unsafe_allow_html=True)
-with c2:
-    st.markdown(f"""<div class='metric-card'><div class='metric-tag'>Calls Consumed</div><div class='metric-num'>{st.session_state.api_used}</div></div>""", unsafe_allow_html=True)
-
-st.markdown("<br>", unsafe_allow_html=True)
+st.markdown(f"""
+<div class='metric-grid'>
+    <div class='stat-cube'>
+        <div class='stat-cube-val'>{st.session_state.api_rem}</div>
+        <div class='stat-cube-lbl'>API Calls Remaining</div>
+    </div>
+    <div class='stat-cube'>
+        <div class='stat-cube-val'>{st.session_state.api_used}</div>
+        <div class='stat-cube-lbl'>Calls Consumed</div>
+    </div>
+</div>
+""", unsafe_allow_html=True)
 
 # Main Processing Loop
-if scan_btn:
-    st.session_state.opp_cards = []
+if run_scan:
+    st.session_state.opps = []
     try:
-        with st.spinner("Processing lines..."):
-            if mode == "📊 All Games (Mainlines)":
-                raw_data, rem, used = fetch_mainline_slate(sport_key, markets_to_request)
-                events_to_process = raw_data
+        with st.spinner("Crunching sharp consensus and purging in-game lines..."):
+            if scan_mode == "📊 All Games (Mainlines)":
+                raw_events, rem, used = fetch_mainlines(sport_key, queried_markets)
             else:
-                raw_data, rem, used = fetch_props_for_game(sport_key, target_event_id, markets_to_request)
-                events_to_process = [raw_data]
+                raw_data, rem, used = fetch_game_props(sport_key, target_event_id, queried_markets)
+                raw_events = [raw_data]
 
             st.session_state.api_rem = rem
             st.session_state.api_used = used
-            extracted = []
+            now_utc = datetime.now(timezone.utc)
+            found_plays = []
 
-            for event in events_to_process:
-                matchup_str = f"{event.get('away_team')} @ {event.get('home_team')}"
-                commence = event.get("commence_time", "")
-                bookmakers = event.get("bookmakers", [])
+            for ev in raw_events:
+                # 1. Block games that have already started (eliminates stale in-game odds bugs)
+                commence_raw = ev.get("commence_time", "")
+                if commence_raw:
+                    commence_dt = datetime.fromisoformat(commence_raw.replace("Z", "+00:00"))
+                    if commence_dt <= now_utc:
+                        continue  # Skip live or concluded games
+
+                matchup = f"{ev.get('away_team')} @ {ev.get('home_team')}"
+                bookmakers = ev.get("bookmakers", [])
 
                 pinnacle_fair = {}
-                playnow_lines = []
+                playnow_wagers = []
 
                 for bm in bookmakers:
-                    b_key = bm.get("key", "").lower()
+                    bm_key = bm.get("key", "").lower()
 
-                    # Pinnacle Math
-                    if "pinnacle" in b_key:
+                    # Sharp Benchmark: Pinnacle
+                    if "pinnacle" in bm_key:
                         for m in bm.get("markets", []):
-                            outs = m.get("outcomes", [])
-                            if len(outs) >= 2:
-                                raw_p = {o.get("description", "") + o["name"] + str(o.get("point", "")): 1.0 / o["price"] for o in outs if o.get("price", 0) > 1.0}
-                                total_v = sum(raw_p.values())
-                                if total_v > 0:
-                                    for o in outs:
+                            outcomes = m.get("outcomes", [])
+                            if len(outcomes) >= 2:
+                                raw_p = {o.get("description", "") + o["name"] + str(o.get("point", "")): 1.0 / o["price"] for o in outcomes if o.get("price", 0) > 1.0}
+                                total_vig = sum(raw_p.values())
+                                if total_vig > 0:
+                                    for o in outcomes:
                                         desc = o.get("description", "")
                                         pt = o.get("point", None)
                                         ident = desc + o["name"] + str(pt if pt is not None else "")
-                                        pinnacle_fair[ident] = raw_p[ident] / total_v
+                                        pinnacle_fair[ident] = raw_p[ident] / total_vig
 
-                    # PlayNow Target
-                    elif "playnow" in b_key:
+                    # Target: PlayNow SK
+                    elif "playnow" in bm_key:
                         for m in bm.get("markets", []):
                             for o in m.get("outcomes", []):
-                                p_name = o.get("description", "")
-                                pt = o.get("point", None)
+                                p_desc = o.get("description", "")
                                 side = o.get("name")
-                                label = f"{p_name} {side} {pt}" if p_name else f"{side} {f'({pt})' if pt is not None else ''}"
-                                ident = p_name + side + str(pt if pt is not None else "")
+                                pt = o.get("point", None)
+                                label = f"{p_desc} {side} {pt}" if p_desc else f"{side} {f'({pt})' if pt is not None else ''}"
+                                ident = p_desc + side + str(pt if pt is not None else "")
 
-                                playnow_lines.append({
+                                playnow_wagers.append({
                                     "ident": ident,
                                     "display": label,
-                                    "player": p_name if p_name else matchup_str,
+                                    "subject": p_desc if p_desc else matchup,
                                     "price": o["price"],
-                                    "matchup": matchup_str,
-                                    "time": commence
+                                    "matchup": matchup,
+                                    "time": commence_raw
                                 })
 
-                # Comparison
-                for pick in playnow_lines:
-                    id_key = pick["ident"]
-                    if id_key not in pinnacle_fair:
+                # Filter & Compute Edge
+                for wager in playnow_wagers:
+                    id_k = wager["ident"]
+                    if id_k not in pinnacle_fair:
                         continue
 
-                    fair_p = pinnacle_fair[id_key]
-                    dec = pick["price"]
-                    ev = ((dec * fair_p) - 1.0) * 100.0
+                    fair_p = pinnacle_fair[id_k]
+                    
+                    # 2. Enforce Minimum Win Probability Cutoff (Default 40%)
+                    if (fair_p * 100.0) < min_win_prob:
+                        continue
 
-                    if ev >= min_ev_threshold:
-                        stake_pct = calculate_kelly(fair_p, dec, fraction=kelly_fraction)
-                        extracted.append({
-                            "player": pick["player"],
-                            "pick_text": pick["display"],
-                            "matchup": pick["matchup"],
-                            "playnow_odds": decimal_to_american(dec),
-                            "pinnacle_fair": decimal_to_american(1.0 / fair_p),
+                    dec_odds = wager["price"]
+                    ev_pct = ((dec_odds * fair_p) - 1.0) * 100.0
+
+                    # 3. Enforce Edge Threshold
+                    if ev_pct >= min_edge:
+                        rec_stake = calculate_kelly(fair_p, dec_odds, fraction=kelly_fraction)
+                        found_plays.append({
+                            "subject": wager["subject"],
+                            "pick": wager["display"],
+                            "matchup": wager["matchup"],
+                            "playnow_us": decimal_to_american(dec_odds),
+                            "fair_us": decimal_to_american(1.0 / fair_p),
                             "fair_prob": f"{round(fair_p * 100, 1)}%",
-                            "ev": round(ev, 2),
-                            "rec_stake": round(stake_pct * bankroll, 2),
-                            "time": pick["time"][:16].replace("T", " ")
+                            "ev": round(ev_pct, 2),
+                            "stake": round(rec_stake * bankroll, 2),
+                            "time": wager["time"][:16].replace("T", " ")
                         })
 
-            st.session_state.opp_cards = extracted
-            if extracted:
-                st.success(f"Found {len(extracted)} +EV plays on PlayNow SK!")
+            st.session_state.opps = found_plays
+            if found_plays:
+                st.success(f"Discovered {len(found_plays)} high-probability +EV edges on PlayNow SK!")
             else:
-                st.info("No PlayNow lines currently meet the +EV threshold for this scan.")
+                st.info(f"No plays met both the +EV threshold and the {min_win_prob}% win probability floor.")
+
     except Exception as ex:
-        st.error(f"Scan error: {ex}")
+        st.error(f"Scan failed: {ex}")
 
 # Render Wager Cards
-if st.session_state.opp_cards:
-    st.markdown("### 🟢 Opportunities on PlayNow SK")
-    for row in st.session_state.opp_cards:
+if st.session_state.opps:
+    st.markdown("### 🟢 Qualified Value Plays")
+    for row in st.session_state.opps:
         st.markdown(f"""
-        <div class="prop-card">
-            <div class="prop-header">
+        <div class="wager-card">
+            <div class="card-top">
                 <div>
-                    <span class="badge-playnow">PLAYNOW SK</span>
-                    <span style="font-size: 11px; color: #64748b; margin-left: 8px;">{row['time']}</span>
+                    <span class="source-tag">PLAYNOW SK</span>
+                    <span style="font-size: 11px; color: #64748b; margin-left: 8px; font-family: 'JetBrains Mono';">{row['time']} UTC</span>
                 </div>
-                <div class="badge-edge">+{row['ev']}% EDGE</div>
+                <div class="edge-badge">+{row['ev']}% EDGE</div>
             </div>
-            <div class="player-name">{row['player']}</div>
-            <div style="font-size: 14px; font-weight: 700; color: #38bdf8; margin-top: 2px;">{row['pick_text']}</div>
-            <div class="odds-matrix">
+            <div class="match-label">{row['matchup']}</div>
+            <div class="selection-label">{row['pick']}</div>
+            <div class="odds-terminal">
                 <div>
-                    <div class="matrix-title">PlayNow Odds</div>
-                    <div class="matrix-val" style="color:#10b981;">{row['playnow_odds']}</div>
+                    <div class="terminal-lbl">PlayNow Odds</div>
+                    <div class="terminal-data" style="color:#10b981;">{row['playnow_us']}</div>
                 </div>
                 <div>
-                    <div class="matrix-title">Fair Line</div>
-                    <div class="matrix-val">{row['pinnacle_fair']}</div>
+                    <div class="terminal-lbl">Sharp Fair</div>
+                    <div class="terminal-data">{row['fair_us']}</div>
                 </div>
                 <div>
-                    <div class="matrix-title">Win Prob</div>
-                    <div class="matrix-val">{row['fair_prob']}</div>
+                    <div class="terminal-lbl">Win Prob</div>
+                    <div class="terminal-data">{row['fair_prob']}</div>
                 </div>
                 <div>
-                    <div class="matrix-title">Kelly Stake</div>
-                    <div class="matrix-val" style="color:#fbbf24;">${row['rec_stake']}</div>
+                    <div class="terminal-lbl">Kelly Bet</div>
+                    <div class="terminal-data" style="color:#f59e0b;">${row['stake']}</div>
                 </div>
             </div>
         </div>
@@ -383,43 +481,43 @@ if st.session_state.opp_cards:
     # 1-Tap Google Sheets Logger
     st.markdown("---")
     st.markdown("### 📝 Quick-Log Wager to Google Sheet")
-    with st.form("bet_quick_logger"):
-        item_labels = [f"{c['player']} ➔ {c['pick_text']} ({c['playnow_odds']})" for c in st.session_state.opp_cards]
-        selected_index = st.selectbox("Select Play", range(len(item_labels)), format_func=lambda i: item_labels[i])
-        active = st.session_state.opp_cards[selected_index]
+    with st.form("quick_log_form"):
+        play_labels = [f"{o['matchup']} ➔ {o['pick']} ({o['playnow_us']})" for o in st.session_state.opps]
+        selected_idx = st.selectbox("Select Wager to Record", range(len(play_labels)), format_func=lambda x: play_labels[x])
+        active = st.session_state.opps[selected_idx]
 
-        col_a, col_b = st.columns(2)
-        logged_stake = col_a.number_input("Wagered ($ CAD)", min_value=1.0, value=float(max(1.0, active["rec_stake"])))
-        bet_status = col_b.selectbox("Result", ["Open", "Won", "Lost", "Push"])
+        c1, c2 = st.columns(2)
+        final_stake = c1.number_input("Actual Stake ($ CAD)", min_value=1.0, value=float(max(1.0, active["stake"])))
+        bet_status = c2.selectbox("Result", ["Open", "Won", "Lost", "Push"])
 
-        submit_to_sheet = st.form_submit_button("Record Wager to Sheet", type="primary")
+        record_btn = st.form_submit_button("Record to Betting_Tracker Sheet", type="primary")
 
-        if submit_to_sheet:
+        if record_btn:
             try:
                 sheet = conn.read(worksheet="Sheet1", ttl=0)
-                new_entry = pd.DataFrame([{
-                    "Date": datetime.utcnow().strftime("%Y-%m-%d %H:%M UTC"),
+                new_row = pd.DataFrame([{
+                    "Date": datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC"),
                     "Matchup": active["matchup"],
-                    "Pick": f"{active['player']} - {active['pick_text']}",
+                    "Pick": active["pick"],
                     "Sportsbook": "PlayNow SK",
-                    "Odds": active["playnow_odds"],
-                    "Stake": logged_stake,
+                    "Odds": active["playnow_us"],
+                    "Stake": final_stake,
                     "EV_Percent": active["ev"],
                     "Status": bet_status,
-                    "Notes": f"Fair: {active['pinnacle_fair']} ({active['fair_prob']})"
+                    "Notes": f"Fair: {active['fair_us']} ({active['fair_prob']})"
                 }])
-                combined = pd.concat([sheet, new_entry], ignore_index=True) if not sheet.empty else new_entry
-                conn.update(worksheet="Sheet1", data=combined)
-                st.success("Successfully logged to Betting_Tracker Sheet!")
-            except Exception as err:
-                st.error(f"Sheet error: {err}")
+                updated = pd.concat([sheet, new_row], ignore_index=True) if not sheet.empty else new_row
+                conn.update(worksheet="Sheet1", data=updated)
+                st.success("Successfully written to Google Sheets!")
+            except Exception as e:
+                st.error(f"Sheet write error: {e}")
 
 st.markdown("---")
-with st.expander("📊 View Betting_Tracker Google Sheet Log"):
-    if st.button("Refresh Table"):
+with st.expander("📊 View Betting_Tracker Google Sheet"):
+    if st.button("Refresh History"):
         st.cache_data.clear()
     try:
-        records = conn.read(worksheet="Sheet1", ttl=0)
-        st.dataframe(records, use_container_width=True)
+        tracker_data = conn.read(worksheet="Sheet1", ttl=0)
+        st.dataframe(tracker_data, use_container_width=True)
     except Exception as e:
-        st.warning(f"Could not load tracker data: {e}")
+        st.warning(f"Could not load tracker log: {e}")
