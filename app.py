@@ -14,7 +14,7 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
-# --- BESPOKE RETRO-CYBER DARK UI ---
+# --- BESPOKE RETRO-CYBER TERMINAL UI ---
 st.markdown("""
 <style>
     @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600;700;800&family=Plus+Jakarta+Sans:wght@500;700;800&display=swap');
@@ -117,6 +117,13 @@ st.markdown("""
         font-size: 14px;
         color: #94a3b8;
     }
+    .pitcher-tag {
+        font-size: 12px;
+        color: #38bdf8;
+        font-family: 'JetBrains Mono', monospace;
+        margin-top: 2px;
+        margin-bottom: 6px;
+    }
     .selection-label {
         font-size: 19px;
         font-weight: 800;
@@ -144,6 +151,16 @@ st.markdown("""
         font-weight: 700;
         margin-top: 3px;
     }
+    .rationale-box {
+        margin-top: 12px;
+        padding: 10px 12px;
+        background: rgba(30, 41, 59, 0.45);
+        border-left: 3px solid #38bdf8;
+        border-radius: 6px;
+        font-size: 12.5px;
+        color: #cbd5e1;
+        line-height: 1.45;
+    }
 </style>
 """, unsafe_allow_html=True)
 
@@ -162,7 +179,29 @@ def calculate_kelly(fair_p: float, dec: float, fraction: float = 0.25) -> float:
     q = 1.0 - fair_p
     return max(0.0, ((b * fair_p - q) / b) * fraction)
 
-# Zero Credit Cost: events list endpoint is free
+# --- 100% FREE MLB STATS API (PITCHERS) ---
+@st.cache_data(ttl=3600, show_spinner=False)
+def fetch_mlb_probable_pitchers(date_str: str):
+    """Fetches officially posted probable pitchers from MLB Stats API at zero token cost."""
+    try:
+        url = f"https://statsapi.mlb.com/api/v1/schedule?sportId=1&date={date_str}&hydrate=probablePitcher"
+        res = requests.get(url, timeout=8).json()
+        pitcher_map = {}
+        for date_obj in res.get("dates", []):
+            for game in date_obj.get("games", []):
+                away = game.get("teams", {}).get("away", {})
+                home = game.get("teams", {}).get("home", {})
+                away_team = away.get("team", {}).get("name", "")
+                home_team = home.get("team", {}).get("name", "")
+                
+                away_pitcher = away.get("probablePitcher", {}).get("fullName", "TBD")
+                home_pitcher = home.get("probablePitcher", {}).get("fullName", "TBD")
+                pitcher_map[f"{away_team} @ {home_team}"] = f"{away_pitcher} vs {home_pitcher}"
+        return pitcher_map
+    except Exception:
+        return {}
+
+# Free Events List
 @st.cache_data(ttl=3600, show_spinner=False)
 def get_upcoming_events(sport_key: str):
     url = f"{BASE_URL}/{sport_key}/events"
@@ -170,7 +209,6 @@ def get_upcoming_events(sport_key: str):
     res.raise_for_status()
     return res.json()
 
-# 45 min cache to safeguard quota
 @st.cache_data(ttl=2700, show_spinner=False)
 def fetch_mainlines(sport_key: str, markets_str: str):
     url = f"{BASE_URL}/{sport_key}/odds"
@@ -196,6 +234,27 @@ def fetch_game_props(sport_key: str, event_id: str, markets_csv: str):
     res = requests.get(url, params=params, timeout=12)
     res.raise_for_status()
     return res.json(), res.headers.get("x-requests-remaining", "N/A"), res.headers.get("x-requests-used", "N/A")
+
+def generate_rationale(pick_name: str, matchup: str, win_prob: float, ev_pct: float, odds_us: str, pitchers: str = "") -> str:
+    """Generates the handicapping narrative explaining why the system selected this play."""
+    team = pick_name.split("(")[0].strip()
+    pitcher_info = f" Matchup context: **{pitchers}**." if pitchers and pitchers != "TBD vs TBD" else ""
+    
+    if win_prob >= 63.0:
+        if ev_pct >= 0:
+            return f"**High-Conviction Edge**: Market consensus gives {team} an overwhelming **{win_prob:.1f}% chance** to cash. PlayNow has miscalculated the line relative to sharp offshore benchmarks, giving you a rare **+{ev_pct:.2f}% mathematical edge**.{pitcher_info}"
+        else:
+            return f"**Heavy Slate Anchor**: {team} is backed by a commanding **{win_prob:.1f}% win probability**. While the book holds a small {abs(ev_pct):.2f}% commission, PlayNow's price ({odds_us}) is priced with low juice compared to typical retail vig. Excellent parlay leg or straight bet.{pitcher_info}"
+    elif win_prob >= 54.0:
+        if ev_pct >= 0:
+            return f"**Sharp Value Pick**: {team} holds a decisive **{win_prob:.1f}% win projection**. PlayNow's payout is lagging behind sharp syndicate moves, locking in a favorable **+{ev_pct:.2f}% edge**.{pitcher_info}"
+        else:
+            return f"**Solid High-Floor Favorite**: Market consensus leans noticeably toward {team} (**{win_prob:.1f}% win probability**). The price reflects honest fair value without predatory retail markups.{pitcher_info}"
+    else:
+        if ev_pct >= 0:
+            return f"**Live Value Play**: A near coin-flip where {team} holds a **{win_prob:.1f}% win rate**, but PlayNow is paying significantly higher than true fair probability (+{ev_pct:.2f}% EV).{pitcher_info}"
+        else:
+            return f"**Competitive Coin-Flip**: Sharp models price this tight with {team} at **{win_prob:.1f}%**. Strong candidate for spread insurance (+1.5) or small straight action.{pitcher_info}"
 
 SPORTS_PRESETS = {
     "⚾ MLB Baseball": {
@@ -224,20 +283,29 @@ selected_sport_label = st.sidebar.selectbox("Sport Slate", list(SPORTS_PRESETS.k
 sport_info = SPORTS_PRESETS[selected_sport_label]
 sport_key = sport_info["key"]
 
-# Timeframe Filter in Local SK Time
-time_window = st.sidebar.selectbox(
+now_local = datetime.now(LOCAL_TZ)
+tomorrow_local = (now_local + timedelta(days=1)).date()
+day_after_local = (now_local + timedelta(days=2)).date()
+
+date_filter_mode = st.sidebar.selectbox(
     "Game Timeframe",
-    ["Upcoming 12 Hours", "Upcoming 24 Hours", "Upcoming 48 Hours", "All Available Games"],
-    index=1
+    [
+        "Upcoming 24 Hours",
+        f"Tomorrow ({tomorrow_local.strftime('%b %d')})",
+        f"Day After Tomorrow ({day_after_local.strftime('%b %d')})",
+        "Pick Specific Date (Calendar)"
+    ]
 )
+
+chosen_calendar_date = None
+if date_filter_mode == "Pick Specific Date (Calendar)":
+    chosen_calendar_date = st.sidebar.date_input("Select Date", value=now_local.date())
 
 scan_mode = st.sidebar.radio("Scan Mode", ["📊 All Games (Mainlines)", "🎯 Prop Sniper (Token Safe)"])
 
 target_event_id = None
 queried_markets = ""
 credit_cost = 2
-
-now_local = datetime.now(LOCAL_TZ)
 
 if scan_mode == "📊 All Games (Mainlines)":
     main_selection = st.sidebar.multiselect("Markets", ["h2h (Moneyline)", "spreads", "totals"], default=["h2h (Moneyline)", "spreads", "totals"])
@@ -274,33 +342,32 @@ else:
                 queried_markets = ",".join(selected_props)
                 credit_cost = len(selected_props) * 2
             else:
-                st.sidebar.info("No upcoming games found for this sport.")
+                st.sidebar.info("No upcoming games found.")
         else:
             st.sidebar.info("No games listed.")
     except Exception as e:
         st.sidebar.error(f"Event error: {e}")
 
 st.sidebar.markdown("---")
-st.sidebar.markdown("**Filters & Thresholds**")
+st.sidebar.markdown("**Filters & Bankroll**")
 bankroll = st.sidebar.number_input("Bankroll ($ CAD)", min_value=10.0, value=1000.0, step=50.0)
 
-# Edge slider allowing negative margins to reveal best-priced favorites and coin-flips
 min_edge = st.sidebar.slider(
-    "Min Edge (% EV)", 
+    "Min Edge / Hold (% EV)", 
     min_value=-6.0, 
     max_value=10.0, 
-    value=-3.5, 
+    value=-4.5, 
     step=0.25,
-    help="Set around -3.5% to capture standard-vig PlayNow favorites and high-confidence picks."
+    help="Set to -4.0% to -4.5% to see regular PlayNow favorites and high-confidence plays."
 )
 
 min_win_prob = st.sidebar.slider(
     "Min Win Probability %", 
     min_value=30, 
     max_value=85, 
-    value=45, 
+    value=50, 
     step=5,
-    help="Set to 50%+ for favorites and coin-flips; 60%+ for heavy favorites."
+    help="Default 50%+ restricts output to strong favorites and coin-flips."
 )
 
 sort_by = st.sidebar.selectbox(
@@ -313,7 +380,7 @@ run_scan = st.sidebar.button(f"⚡ Scan Board (~{credit_cost} Credits)", type="p
 
 # --- MAIN DISPLAY ---
 st.markdown("<div class='terminal-title'>⚡ PYLOS PARLAYS <span class='accent-pill'>PLAYNOW SK</span></div>", unsafe_allow_html=True)
-st.markdown("<div class='terminal-sub'>SHARP MARKET CONSENSUS ➔ PLAYNOW VALUE & PROBABILITY TERMINAL</div>", unsafe_allow_html=True)
+st.markdown("<div class='terminal-sub'>MLB PITCHERS ➔ SHARP MARKET CONSENSUS ➔ SASKATCHEWAN TERMINAL</div>", unsafe_allow_html=True)
 
 if "api_rem" not in st.session_state:
     st.session_state.api_rem = "---"
@@ -337,7 +404,7 @@ st.markdown(f"""
 if run_scan:
     st.session_state.opps = []
     try:
-        with st.spinner("Analyzing market consensus across sharp books..."):
+        with st.spinner("Analyzing market consensus and scraping probable pitchers..."):
             if scan_mode == "📊 All Games (Mainlines)":
                 raw_events, rem, used = fetch_mainlines(sport_key, queried_markets)
             else:
@@ -351,15 +418,18 @@ if run_scan:
             st.session_state.api_used = used
             now_local = datetime.now(LOCAL_TZ)
 
-            # Determine maximum cutoff window
-            window_hours = 9999
-            if time_window == "Upcoming 12 Hours":
-                window_hours = 12
-            elif time_window == "Upcoming 24 Hours":
-                window_hours = 24
-            elif time_window == "Upcoming 48 Hours":
-                window_hours = 48
-            cutoff_dt = now_local + timedelta(hours=window_hours)
+            # Fetch MLB Probable Pitchers (Free API)
+            active_target_date_str = now_local.strftime("%Y-%m-%d")
+            if "Tomorrow" in date_filter_mode and "Day After" not in date_filter_mode:
+                active_target_date_str = tomorrow_local.strftime("%Y-%m-%d")
+            elif "Day After Tomorrow" in date_filter_mode:
+                active_target_date_str = day_after_local.strftime("%Y-%m-%d")
+            elif date_filter_mode == "Pick Specific Date (Calendar)" and chosen_calendar_date:
+                active_target_date_str = chosen_calendar_date.strftime("%Y-%m-%d")
+
+            pitcher_data = {}
+            if "baseball" in sport_key:
+                pitcher_data = fetch_mlb_probable_pitchers(active_target_date_str)
 
             found_plays = []
             SHARP_KEYS = ["pinnacle", "betfair_ex_eu", "betonlineag", "coolbet", "unibet_eu", "betvictor"]
@@ -371,14 +441,30 @@ if run_scan:
                 commence_raw = ev.get("commence_time", "")
                 if commence_raw:
                     dt = datetime.fromisoformat(commence_raw.replace("Z", "+00:00")).astimezone(LOCAL_TZ)
-                    # Filter out games already started or outside the chosen window
-                    if dt <= now_local or dt > cutoff_dt:
+                    
+                    if dt <= now_local:
                         continue
+
+                    if date_filter_mode == "Upcoming 24 Hours":
+                        if dt > now_local + timedelta(hours=24):
+                            continue
+                    elif "Tomorrow" in date_filter_mode and "Day After" not in date_filter_mode:
+                        if dt.date() != tomorrow_local:
+                            continue
+                    elif "Day After Tomorrow" in date_filter_mode:
+                        if dt.date() != day_after_local:
+                            continue
+                    elif date_filter_mode == "Pick Specific Date (Calendar)":
+                        if dt.date() != chosen_calendar_date:
+                            continue
 
                 total_games_checked += 1
                 matchup = f"{ev.get('away_team')} @ {ev.get('home_team')}"
                 formatted_time = dt.strftime("%b %d - %I:%M %p")
                 bookmakers = ev.get("bookmakers", [])
+
+                # Match Pitcher Names
+                pitcher_str = pitcher_data.get(matchup, "")
 
                 market_probs = {}
                 playnow_wagers = []
@@ -417,7 +503,9 @@ if run_scan:
                                     "ident": ident,
                                     "display": label,
                                     "price": o["price"],
+                                    "dec_price": o["price"],
                                     "matchup": matchup,
+                                    "pitchers": pitcher_str,
                                     "time": formatted_time
                                 })
 
@@ -429,14 +517,12 @@ if run_scan:
                     fair_p = float(np.mean(market_probs[id_k]))
                     win_prob_pct = fair_p * 100.0
 
-                    # 1. Win Probability Floor
                     if win_prob_pct < min_win_prob:
                         continue
 
                     dec_odds = wager["price"]
                     ev_pct = ((dec_odds * fair_p) - 1.0) * 100.0
 
-                    # 2. Edge / Hold Threshold
                     if ev_pct >= min_edge:
                         rec_stake = calculate_kelly(fair_p, dec_odds, fraction=kelly_fraction)
                         suggested_cash = round(rec_stake * bankroll, 2) if ev_pct >= 0 else round(0.01 * bankroll, 2)
@@ -444,7 +530,9 @@ if run_scan:
                         found_plays.append({
                             "pick": wager["display"],
                             "matchup": wager["matchup"],
+                            "pitchers": wager["pitchers"],
                             "playnow_us": decimal_to_american(dec_odds),
+                            "playnow_dec": dec_odds,
                             "fair_us": decimal_to_american(1.0 / fair_p),
                             "fair_prob_num": win_prob_pct,
                             "fair_prob": f"{round(win_prob_pct, 1)}%",
@@ -460,87 +548,180 @@ if run_scan:
 
             st.session_state.opps = found_plays
 
-            st.caption(f"Diagnostics: Scanned {total_games_checked} games in timeframe | Found {playnow_lines_found} total PlayNow lines.")
+            st.caption(f"Diagnostics: Scanned {total_games_checked} games | Analyzed {playnow_lines_found} PlayNow lines.")
             if found_plays:
                 st.success(f"Loaded {len(found_plays)} qualified bets matching your criteria!")
             else:
-                st.info(f"0 bets matched. Try sliding 'Min Edge' to -4.5% or lowering 'Min Win Probability' to 40%.")
+                st.info("0 bets matched. Adjust your Min Edge slider or broaden the timeframe.")
 
     except Exception as ex:
         st.error(f"Scan failed: {ex}")
 
-# Render Wager Cards
-if st.session_state.opps:
-    st.markdown("### 🟢 Qualified Bets on PlayNow SK")
-    for row in st.session_state.opps:
-        badge_style = "background: rgba(16, 185, 129, 0.15); color: #10b981; border: 1px solid #10b981;" if row['ev'] >= 0 else "background: rgba(56, 189, 248, 0.15); color: #38bdf8; border: 1px solid #0284c7;"
-        badge_text = f"+{row['ev']}% EDGE" if row['ev'] >= 0 else f"{row['ev']}% HOLD"
+# --- TABS: SINGLE BETS vs PARLAY BUILDER ---
+tab_singles, tab_parlays = st.tabs(["🟢 Single Value Plays", "⚡ Parlay Builder (Combine Bets)"])
 
-        st.markdown(f"""
-        <div class="wager-card">
-            <div class="card-top">
-                <div>
-                    <span class="source-tag">PLAYNOW SK</span>
-                    <span style="font-size: 11px; color: #64748b; margin-left: 8px; font-family: 'JetBrains Mono';">{row['time']} SK</span>
+with tab_singles:
+    if st.session_state.opps:
+        for row in st.session_state.opps:
+            badge_style = "background: rgba(16, 185, 129, 0.15); color: #10b981; border: 1px solid #10b981;" if row['ev'] >= 0 else "background: rgba(56, 189, 248, 0.15); color: #38bdf8; border: 1px solid #0284c7;"
+            badge_text = f"+{row['ev']}% EDGE" if row['ev'] >= 0 else f"{row['ev']}% HOLD"
+
+            pitcher_html = f"<div class='pitcher-tag'>⚾ Probables: {row['pitchers']}</div>" if row['pitchers'] else ""
+            rationale_html = generate_rationale(row['pick'], row['matchup'], row['fair_prob_num'], row['ev'], row['playnow_us'], row['pitchers'])
+
+            st.markdown(f"""
+            <div class="wager-card">
+                <div class="card-top">
+                    <div>
+                        <span class="source-tag">PLAYNOW SK</span>
+                        <span style="font-size: 11px; color: #64748b; margin-left: 8px; font-family: 'JetBrains Mono';">{row['time']} SK</span>
+                    </div>
+                    <div class="edge-badge" style="{badge_style}">{badge_text}</div>
                 </div>
-                <div class="edge-badge" style="{badge_style}">{badge_text}</div>
+                <div class="match-label">{row['matchup']}</div>
+                {pitcher_html}
+                <div class="selection-label">{row['pick']}</div>
+                <div class="odds-terminal">
+                    <div>
+                        <div class="terminal-lbl">PlayNow Odds</div>
+                        <div class="terminal-data" style="color:#10b981;">{row['playnow_us']}</div>
+                    </div>
+                    <div>
+                        <div class="terminal-lbl">Sharp Fair</div>
+                        <div class="terminal-data">{row['fair_us']}</div>
+                    </div>
+                    <div>
+                        <div class="terminal-lbl">Win Prob</div>
+                        <div class="terminal-data" style="color:#38bdf8;">{row['fair_prob']}</div>
+                    </div>
+                    <div>
+                        <div class="terminal-lbl">Suggested Bet</div>
+                        <div class="terminal-data" style="color:#f59e0b;">${row['stake']}</div>
+                    </div>
+                </div>
+                <div class="rationale-box">
+                    💡 <b>Why the System Likes This:</b> {rationale_html}
+                </div>
             </div>
-            <div class="match-label">{row['matchup']}</div>
-            <div class="selection-label">{row['pick']}</div>
-            <div class="odds-terminal">
-                <div>
-                    <div class="terminal-lbl">PlayNow Odds</div>
-                    <div class="terminal-data" style="color:#10b981;">{row['playnow_us']}</div>
+            """, unsafe_allow_html=True)
+
+        # 1-Tap Google Sheets Logger
+        st.markdown("---")
+        st.markdown("### 📝 Quick-Log Wager to Google Sheet")
+        with st.form("quick_log_form"):
+            play_labels = [f"{o['matchup']} ➔ {o['pick']} ({o['playnow_us']}) | Prob: {o['fair_prob']}" for o in st.session_state.opps]
+            selected_idx = st.selectbox("Select Wager to Record", range(len(play_labels)), format_func=lambda x: play_labels[x])
+            active = st.session_state.opps[selected_idx]
+
+            c1, c2 = st.columns(2)
+            final_stake = c1.number_input("Actual Stake ($ CAD)", min_value=1.0, value=float(max(1.0, active["stake"])))
+            bet_status = c2.selectbox("Result", ["Open", "Won", "Lost", "Push"])
+
+            record_btn = st.form_submit_button("Record to Betting_Tracker Sheet", type="primary")
+
+            if record_btn:
+                try:
+                    sheet = conn.read(worksheet="Sheet1", ttl=0)
+                    new_row = pd.DataFrame([{
+                        "Date": datetime.now(LOCAL_TZ).strftime("%Y-%m-%d %I:%M %p"),
+                        "Matchup": active["matchup"],
+                        "Pick": active["pick"],
+                        "Sportsbook": "PlayNow SK",
+                        "Odds": active["playnow_us"],
+                        "Stake": final_stake,
+                        "EV_Percent": active["ev"],
+                        "Status": bet_status,
+                        "Notes": f"Fair: {active['fair_us']} ({active['fair_prob']})"
+                    }])
+                    updated = pd.concat([sheet, new_row], ignore_index=True) if not sheet.empty else new_row
+                    conn.update(worksheet="Sheet1", data=updated)
+                    st.success("Successfully logged to Google Sheet!")
+                except Exception as e:
+                    st.error(f"Sheet error: {e}")
+
+# --- PARLAY BUILDER TAB ---
+with tab_parlays:
+    st.markdown("### ⚡ Multi-Leg Parlay Architect")
+    st.caption("Select 2 to 3 high-probability wagers from your scan to form a combined plus-money ticket on PlayNow SK.")
+
+    if len(st.session_state.opps) >= 2:
+        parlay_choices = [f"{o['matchup']} ➔ {o['pick']} ({o['playnow_us']}) - {o['fair_prob']}" for o in st.session_state.opps]
+        selected_legs = st.multiselect("Select Parlay Legs (2 to 4)", options=parlay_choices, default=parlay_choices[:2])
+
+        if len(selected_legs) >= 2:
+            # Mathematical Parlay compounding
+            indices = [parlay_choices.index(choice) for choice in selected_legs]
+            chosen_data = [st.session_state.opps[i] for i in indices]
+
+            total_decimal_odds = 1.0
+            joint_prob = 1.0
+
+            for leg in chosen_data:
+                total_decimal_odds *= leg["playnow_dec"]
+                joint_prob *= (leg["fair_prob_num"] / 100.0)
+
+            parlay_us = decimal_to_american(total_decimal_odds)
+            parlay_win_prob_pct = round(joint_prob * 100.0, 1)
+
+            st.markdown(f"""
+            <div class="wager-card" style="border: 2px solid #38bdf8;">
+                <div class="card-top">
+                    <div>
+                        <span class="source-tag" style="background-color: #38bdf8; color: #021a2e;">PARLAY TICKET</span>
+                        <span style="font-size: 11px; color: #64748b; margin-left: 8px;">{len(selected_legs)} LEGS COMBINED</span>
+                    </div>
                 </div>
-                <div>
-                    <div class="terminal-lbl">Sharp Fair</div>
-                    <div class="terminal-data">{row['fair_us']}</div>
-                </div>
-                <div>
-                    <div class="terminal-lbl">Win Prob</div>
-                    <div class="terminal-data" style="color:#38bdf8;">{row['fair_prob']}</div>
-                </div>
-                <div>
-                    <div class="terminal-lbl">Suggested Bet</div>
-                    <div class="terminal-data" style="color:#f59e0b;">${row['stake']}</div>
+                <div class="selection-label">Multi-Leg Parlay ({parlay_us})</div>
+                <div class="odds-terminal">
+                    <div>
+                        <div class="terminal-lbl">Combined Odds</div>
+                        <div class="terminal-data" style="color:#10b981;">{parlay_us} ({total_decimal_odds:.2f})</div>
+                    </div>
+                    <div>
+                        <div class="terminal-lbl">Joint Win Prob</div>
+                        <div class="terminal-data" style="color:#38bdf8;">{parlay_win_prob_pct}%</div>
+                    </div>
+                    <div>
+                        <div class="terminal-lbl">Estimated Payout ($10)</div>
+                        <div class="terminal-data" style="color:#f59e0b;">${round(10 * total_decimal_odds, 2)}</div>
+                    </div>
+                    <div>
+                        <div class="terminal-lbl">Suggested Bet</div>
+                        <div class="terminal-data" style="color:#f59e0b;">$10.00</div>
+                    </div>
                 </div>
             </div>
-        </div>
-        """, unsafe_allow_html=True)
+            """, unsafe_allow_html=True)
 
-    # 1-Tap Google Sheets Logger
-    st.markdown("---")
-    st.markdown("### 📝 Quick-Log Wager to Google Sheet")
-    with st.form("quick_log_form"):
-        play_labels = [f"{o['matchup']} ➔ {o['pick']} ({o['playnow_us']}) | Prob: {o['fair_prob']}" for o in st.session_state.opps]
-        selected_idx = st.selectbox("Select Wager to Record", range(len(play_labels)), format_func=lambda x: play_labels[x])
-        active = st.session_state.opps[selected_idx]
+            with st.form("parlay_log_form"):
+                p_stake = st.number_input("Wager Amount ($ CAD)", min_value=1.0, value=10.0, step=5.0)
+                p_status = st.selectbox("Status", ["Open", "Won", "Lost", "Push"])
+                p_log_btn = st.form_submit_button("Record Parlay to Sheet", type="primary")
 
-        c1, c2 = st.columns(2)
-        final_stake = c1.number_input("Actual Stake ($ CAD)", min_value=1.0, value=float(max(1.0, active["stake"])))
-        bet_status = c2.selectbox("Result", ["Open", "Won", "Lost", "Push"])
-
-        record_btn = st.form_submit_button("Record to Betting_Tracker Sheet", type="primary")
-
-        if record_btn:
-            try:
-                sheet = conn.read(worksheet="Sheet1", ttl=0)
-                new_row = pd.DataFrame([{
-                    "Date": datetime.now(LOCAL_TZ).strftime("%Y-%m-%d %I:%M %p"),
-                    "Matchup": active["matchup"],
-                    "Pick": active["pick"],
-                    "Sportsbook": "PlayNow SK",
-                    "Odds": active["playnow_us"],
-                    "Stake": final_stake,
-                    "EV_Percent": active["ev"],
-                    "Status": bet_status,
-                    "Notes": f"Fair: {active['fair_us']} ({active['fair_prob']})"
-                }])
-                updated = pd.concat([sheet, new_row], ignore_index=True) if not sheet.empty else new_row
-                conn.update(worksheet="Sheet1", data=updated)
-                st.success("Successfully logged to Google Sheet!")
-            except Exception as e:
-                st.error(f"Sheet error: {e}")
+                if p_log_btn:
+                    try:
+                        sheet = conn.read(worksheet="Sheet1", ttl=0)
+                        leg_summary = " + ".join([c["pick"] for c in chosen_data])
+                        new_row = pd.DataFrame([{
+                            "Date": datetime.now(LOCAL_TZ).strftime("%Y-%m-%d %I:%M %p"),
+                            "Matchup": f"{len(selected_legs)}-Leg Parlay",
+                            "Pick": leg_summary,
+                            "Sportsbook": "PlayNow SK",
+                            "Odds": parlay_us,
+                            "Stake": p_stake,
+                            "EV_Percent": "Parlay",
+                            "Status": p_status,
+                            "Notes": f"Joint Win Prob: {parlay_win_prob_pct}%"
+                        }])
+                        updated = pd.concat([sheet, new_row], ignore_index=True) if not sheet.empty else new_row
+                        conn.update(worksheet="Sheet1", data=updated)
+                        st.success("Parlay successfully logged to Betting_Tracker Sheet!")
+                    except Exception as e:
+                        st.error(f"Failed to record parlay: {e}")
+        else:
+            st.info("Select at least 2 legs to calculate parlay odds.")
+    else:
+        st.info("Run a scan on the Single Bets tab first to generate candidate legs.")
 
 st.markdown("---")
 with st.expander("📊 View Betting_Tracker Google Sheet"):
