@@ -8,7 +8,7 @@ import numpy as np
 
 # --- PAGE CONFIG ---
 st.set_page_config(
-    page_title="Pylos Parlays | Sharp SK Terminal",
+    page_title="Pylos Parlays | Sharp SK Command Center",
     page_icon="⚡",
     layout="wide",
     initial_sidebar_state="expanded"
@@ -55,6 +55,8 @@ st.markdown("""
         margin-top: 4px;
         margin-bottom: 18px;
     }
+
+    /* Metric Grid */
     .metric-grid {
         display: grid;
         grid-template-columns: repeat(2, 1fr);
@@ -83,83 +85,103 @@ st.markdown("""
         color: #64748b;
         margin-top: 2px;
     }
-    .wager-card {
-        background: linear-gradient(145deg, rgba(15, 23, 42, 0.9) 0%, rgba(11, 15, 25, 0.95) 100%);
-        border: 1px solid #10b981;
-        border-radius: 14px;
-        padding: 18px;
-        margin-bottom: 14px;
-        box-shadow: 0 0 18px rgba(16, 185, 129, 0.15);
+
+    /* 1-Stop Game Dossier Card */
+    .game-dossier {
+        background: linear-gradient(145deg, rgba(15, 23, 42, 0.95) 0%, rgba(11, 15, 25, 0.98) 100%);
+        border: 1px solid #334155;
+        border-radius: 16px;
+        padding: 20px;
+        margin-bottom: 22px;
+        box-shadow: 0 10px 25px rgba(0, 0, 0, 0.5);
     }
-    .card-top {
+    .dossier-header {
         display: flex;
         justify-content: space-between;
         align-items: center;
-        margin-bottom: 8px;
+        border-bottom: 1px solid #1e293b;
+        padding-bottom: 12px;
+        margin-bottom: 14px;
     }
-    .source-tag {
-        background-color: #10b981;
-        color: #041f13;
-        font-family: 'JetBrains Mono', monospace;
-        font-weight: 800;
-        font-size: 11px;
-        padding: 3px 8px;
-        border-radius: 4px;
-    }
-    .edge-badge {
-        font-family: 'JetBrains Mono', monospace;
-        font-weight: 800;
-        font-size: 13px;
-        padding: 4px 10px;
-        border-radius: 6px;
-    }
-    .match-label {
-        font-size: 14px;
-        color: #94a3b8;
-    }
-    .pitcher-tag {
-        font-size: 12px;
-        color: #38bdf8;
-        font-family: 'JetBrains Mono', monospace;
-        margin-top: 2px;
-        margin-bottom: 6px;
-    }
-    .selection-label {
-        font-size: 19px;
+    .matchup-headline {
+        font-size: 20px;
         font-weight: 800;
         color: #ffffff;
-        margin-bottom: 12px;
+        letter-spacing: -0.3px;
     }
-    .odds-terminal {
+    .matchup-records {
+        font-size: 13px;
+        color: #94a3b8;
+        font-family: 'JetBrains Mono', monospace;
+    }
+    .weather-badge {
+        background: rgba(56, 189, 248, 0.12);
+        color: #38bdf8;
+        border: 1px solid rgba(56, 189, 248, 0.3);
+        border-radius: 6px;
+        font-size: 12px;
+        font-family: 'JetBrains Mono', monospace;
+        padding: 4px 10px;
+    }
+
+    /* Tale of the Tape Sub-row */
+    .tape-row {
         display: grid;
-        grid-template-columns: repeat(4, 1fr);
-        gap: 8px;
+        grid-template-columns: 1fr 1fr;
+        gap: 10px;
         background: #070a12;
         border: 1px solid #1e293b;
         border-radius: 8px;
-        padding: 10px;
+        padding: 10px 14px;
+        margin-bottom: 14px;
+        font-size: 12.5px;
+    }
+    .tape-col {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+    }
+
+    /* Markets Table Grid */
+    .market-table {
+        width: 100%;
+        border-collapse: collapse;
+        margin-bottom: 14px;
+        font-family: 'JetBrains Mono', monospace;
+    }
+    .market-table th {
+        background: rgba(30, 41, 59, 0.6);
+        color: #94a3b8;
+        font-size: 11px;
+        text-transform: uppercase;
+        letter-spacing: 0.5px;
+        padding: 8px;
+        text-align: center;
+        border: 1px solid #1e293b;
+    }
+    .market-table td {
+        padding: 8px 10px;
+        border: 1px solid #1e293b;
+        font-size: 13px;
         text-align: center;
     }
-    .terminal-lbl {
-        font-size: 10px;
-        text-transform: uppercase;
-        color: #64748b;
+    .highlight-edge {
+        color: #10b981;
+        font-weight: 800;
     }
-    .terminal-data {
-        font-family: 'JetBrains Mono', monospace;
-        font-size: 14px;
-        font-weight: 700;
-        margin-top: 3px;
+    .highlight-hold {
+        color: #94a3b8;
     }
-    .rationale-box {
-        margin-top: 12px;
-        padding: 10px 12px;
-        background: rgba(30, 41, 59, 0.45);
-        border-left: 3px solid #38bdf8;
+
+    /* Intel / Facts Box */
+    .intel-box {
+        background: rgba(15, 23, 42, 0.8);
+        border-left: 3px solid #10b981;
         border-radius: 6px;
+        padding: 10px 14px;
         font-size: 12.5px;
         color: #cbd5e1;
-        line-height: 1.45;
+        line-height: 1.5;
     }
 </style>
 """, unsafe_allow_html=True)
@@ -169,115 +191,110 @@ BASE_URL = "https://api.the-odds-api.com/v4/sports"
 conn = st.connection("gsheets", type=GSheetsConnection)
 LOCAL_TZ = ZoneInfo("America/Regina")
 
+# Major Stadium Coordinates for Instant Free Weather
+STADIUM_COORDS = {
+    "Miami Marlins": (25.778, -80.220),
+    "Chicago Cubs": (41.948, -87.655),
+    "Los Angeles Dodgers": (34.073, -118.240),
+    "Arizona Diamondbacks": (33.445, -112.066),
+    "New York Yankees": (40.829, -73.926),
+    "Boston Red Sox": (42.346, -71.097),
+    "Toronto Blue Jays": (43.641, -79.389),
+    "Detroit Tigers": (42.339, -83.048),
+    "Houston Astros": (29.757, -95.355),
+    "New York Mets": (40.757, -73.845),
+    "Philadelphia Phillies": (39.906, -75.166),
+    "Atlanta Braves": (33.890, -84.468),
+    "Seattle Mariners": (47.591, -122.332),
+    "Detroit Lions": (42.340, -83.045),
+    "New Orleans Saints": (29.951, -90.081),
+    "Kansas City Chiefs": (39.048, -94.483)
+}
+
 def decimal_to_american(dec: float) -> str:
     if dec >= 2.0:
         return f"+{int(round((dec - 1.0) * 100))}"
     return f"{int(round(-100 / (dec - 1.0)))}"
 
-def calculate_kelly(fair_p: float, dec: float, fraction: float = 0.25) -> float:
-    b = dec - 1.0
-    q = 1.0 - fair_p
-    return max(0.0, ((b * fair_p - q) / b) * fraction)
-
-# --- 100% FREE MLB STATS API (PITCHERS) ---
-@st.cache_data(ttl=3600, show_spinner=False)
-def fetch_mlb_probable_pitchers(date_str: str):
+# Zero Cost: Free Open-Meteo Weather
+@st.cache_data(ttl=7200, show_spinner=False)
+def fetch_weather(home_team: str):
+    coords = STADIUM_COORDS.get(home_team, (41.878, -87.629))
     try:
-        url = f"https://statsapi.mlb.com/api/v1/schedule?sportId=1&date={date_str}&hydrate=probablePitcher"
+        url = f"https://api.open-meteo.com/v1/forecast?latitude={coords[0]}&longitude={coords[1]}&current_weather=true"
+        r = requests.get(url, timeout=5).json()
+        cw = r.get("current_weather", {})
+        temp_c = cw.get("temperature", 20)
+        wind_kmh = cw.get("windspeed", 10)
+        wind_dir = cw.get("winddirection", 0)
+        
+        # Wind arrow interpretation
+        dirs = ["N", "NE", "E", "SE", "S", "SW", "W", "NW"]
+        wind_str = dirs[int((wind_dir + 22.5) % 360 / 45)]
+        return f"{temp_c:.0f}°C | 💨 {wind_kmh:.0f} km/h {wind_str}"
+    except Exception:
+        return "Weather: Dome / Controlled"
+
+# Zero Cost: Free MLB Stats API (Records & Pitchers)
+@st.cache_data(ttl=3600, show_spinner=False)
+def fetch_mlb_intel(date_str: str):
+    try:
+        url = f"https://statsapi.mlb.com/api/v1/schedule?sportId=1&date={date_str}&hydrate=probablePitcher,team,linescore"
         res = requests.get(url, timeout=8).json()
-        pitcher_map = {}
-        for date_obj in res.get("dates", []):
-            for game in date_obj.get("games", []):
-                away = game.get("teams", {}).get("away", {})
-                home = game.get("teams", {}).get("home", {})
-                away_team = away.get("team", {}).get("name", "")
-                home_team = home.get("team", {}).get("name", "")
+        intel_map = {}
+        for d in res.get("dates", []):
+            for g in d.get("games", []):
+                away = g.get("teams", {}).get("away", {})
+                home = g.get("teams", {}).get("home", {})
+                
+                away_name = away.get("team", {}).get("name", "")
+                home_name = home.get("team", {}).get("name", "")
+                
+                away_rec = f"{away.get('leagueRecord', {}).get('wins', 0)}-{away.get('leagueRecord', {}).get('losses', 0)}"
+                home_rec = f"{home.get('leagueRecord', {}).get('wins', 0)}-{home.get('leagueRecord', {}).get('losses', 0)}"
+                
                 away_pitcher = away.get("probablePitcher", {}).get("fullName", "TBD")
                 home_pitcher = home.get("probablePitcher", {}).get("fullName", "TBD")
-                pitcher_map[f"{away_team} @ {home_team}"] = f"{away_pitcher} vs {home_pitcher}"
-        return pitcher_map
+                
+                venue = g.get("venue", {}).get("name", "Stadium")
+                
+                matchup_k = f"{away_name} @ {home_name}"
+                intel_map[matchup_k] = {
+                    "away_rec": away_rec,
+                    "home_rec": home_rec,
+                    "away_pitcher": away_pitcher,
+                    "home_pitcher": home_pitcher,
+                    "venue": venue
+                }
+        return intel_map
     except Exception:
         return {}
 
-@st.cache_data(ttl=3600, show_spinner=False)
-def get_upcoming_events(sport_key: str):
-    url = f"{BASE_URL}/{sport_key}/events"
-    res = requests.get(url, params={"apiKey": ODDS_API_KEY}, timeout=10)
-    res.raise_for_status()
-    return res.json()
-
 @st.cache_data(ttl=2700, show_spinner=False)
-def fetch_mainlines(sport_key: str, markets_str: str):
+def fetch_mainlines(sport_key: str):
     url = f"{BASE_URL}/{sport_key}/odds"
     params = {
         "apiKey": ODDS_API_KEY,
         "regions": "ca,eu",
-        "markets": markets_str,
+        "markets": "h2h,spreads,totals",
         "oddsFormat": "decimal",
     }
     res = requests.get(url, params=params, timeout=12)
     res.raise_for_status()
     return res.json(), res.headers.get("x-requests-remaining", "N/A"), res.headers.get("x-requests-used", "N/A")
-
-@st.cache_data(ttl=2700, show_spinner=False)
-def fetch_game_props(sport_key: str, event_id: str, markets_csv: str):
-    url = f"{BASE_URL}/{sport_key}/events/{event_id}/odds"
-    params = {
-        "apiKey": ODDS_API_KEY,
-        "regions": "ca,eu",
-        "markets": markets_csv,
-        "oddsFormat": "decimal",
-    }
-    res = requests.get(url, params=params, timeout=12)
-    res.raise_for_status()
-    return res.json(), res.headers.get("x-requests-remaining", "N/A"), res.headers.get("x-requests-used", "N/A")
-
-def generate_rationale(pick_name: str, matchup: str, win_prob: float, ev_pct: float, odds_us: str, pitchers: str = "") -> str:
-    team = pick_name.split("(")[0].strip()
-    pitcher_info = f" Matchup context: <b>{pitchers}</b>." if pitchers and pitchers != "TBD vs TBD" else ""
-    
-    if win_prob >= 63.0:
-        if ev_pct >= 0:
-            return f"<b>High-Conviction Edge</b>: Market consensus gives {team} an overwhelming <b>{win_prob:.1f}% chance</b> to cash. PlayNow has miscalculated the line relative to sharp offshore benchmarks, giving you a rare <b>+{ev_pct:.2f}% mathematical edge</b>.{pitcher_info}"
-        else:
-            return f"<b>Heavy Slate Anchor</b>: {team} is backed by a commanding <b>{win_prob:.1f}% win probability</b>. While the book holds a small {abs(ev_pct):.2f}% commission, PlayNow's price ({odds_us}) is priced with low juice compared to typical retail vig. Excellent parlay leg or straight bet.{pitcher_info}"
-    elif win_prob >= 54.0:
-        if ev_pct >= 0:
-            return f"<b>Sharp Value Pick</b>: {team} holds a decisive <b>{win_prob:.1f}% win projection</b>. PlayNow's payout is lagging behind sharp syndicate moves, locking in a favorable <b>+{ev_pct:.2f}% edge</b>.{pitcher_info}"
-        else:
-            return f"<b>Solid High-Floor Favorite</b>: Market consensus leans noticeably toward {team} (<b>{win_prob:.1f}% win probability</b>). The price reflects honest fair value without predatory retail markups.{pitcher_info}"
-    else:
-        if ev_pct >= 0:
-            return f"<b>Live Value Play</b>: A near coin-flip where {team} holds a <b>{win_prob:.1f}% win rate</b>, but PlayNow is paying significantly higher than true fair probability (+{ev_pct:.2f}% EV).{pitcher_info}"
-        else:
-            return f"<b>Competitive Coin-Flip</b>: Sharp models price this tight with {team} at <b>{win_prob:.1f}%</b>. Strong candidate for spread insurance (+1.5) or small straight action.{pitcher_info}"
-
-SPORTS_PRESETS = {
-    "⚾ MLB Baseball": {
-        "key": "baseball_mlb",
-        "props": ["pitcher_strikeouts", "batter_hits", "batter_total_bases", "batter_home_runs", "batter_rbis"]
-    },
-    "🏈 NFL Football": {
-        "key": "americanfootball_nfl",
-        "props": ["player_pass_yds", "player_pass_completions", "player_rush_yds", "player_reception_yds", "player_anytime_td"]
-    },
-    "🏀 NBA Basketball": {
-        "key": "basketball_nba",
-        "props": ["player_points", "player_rebounds", "player_assists", "player_threes", "player_blocks"]
-    },
-    "🏒 NHL Hockey": {
-        "key": "icehockey_nhl",
-        "props": ["player_points", "player_goals", "player_assists", "player_shots_on_goal"]
-    }
-}
 
 # --- SIDEBAR CONTROLS ---
 st.sidebar.markdown("<h3 style='color:#fff;'>⚡ PYLOS TERMINAL</h3>", unsafe_allow_html=True)
 st.sidebar.caption("Benchmark: **Sharp Consensus** | Target: **PlayNow SK**")
 
-selected_sport_label = st.sidebar.selectbox("Sport Slate", list(SPORTS_PRESETS.keys()))
-sport_info = SPORTS_PRESETS[selected_sport_label]
-sport_key = sport_info["key"]
+selected_sport_label = st.sidebar.selectbox("Sport Slate", ["⚾ MLB Baseball", "🏈 NFL Football", "🏀 NBA Basketball", "🏒 NHL Hockey"])
+sport_map = {
+    "⚾ MLB Baseball": "baseball_mlb",
+    "🏈 NFL Football": "americanfootball_nfl",
+    "🏀 NBA Basketball": "basketball_nba",
+    "🏒 NHL Hockey": "icehockey_nhl"
+}
+sport_key = sport_map[selected_sport_label]
 
 now_local = datetime.now(LOCAL_TZ)
 tomorrow_local = (now_local + timedelta(days=1)).date()
@@ -297,91 +314,21 @@ chosen_calendar_date = None
 if date_filter_mode == "Pick Specific Date (Calendar)":
     chosen_calendar_date = st.sidebar.date_input("Select Date", value=now_local.date())
 
-scan_mode = st.sidebar.radio("Scan Mode", ["📊 All Games (Mainlines)", "🎯 Prop Sniper (Token Safe)"])
-
-target_event_id = None
-queried_markets = ""
-credit_cost = 2
-
-if scan_mode == "📊 All Games (Mainlines)":
-    main_selection = st.sidebar.multiselect("Markets", ["h2h (Moneyline)", "spreads", "totals"], default=["h2h (Moneyline)", "spreads", "totals"])
-    if not main_selection:
-        st.stop()
-    clean_keys = [m.split(" ")[0] for m in main_selection]
-    queried_markets = ",".join(clean_keys)
-    credit_cost = len(clean_keys) * 2
-else:
-    try:
-        events = get_upcoming_events(sport_key)
-        if events:
-            filtered_events = []
-            for e in events:
-                commence_raw = e.get("commence_time", "")
-                if commence_raw:
-                    dt = datetime.fromisoformat(commence_raw.replace("Z", "+00:00")).astimezone(LOCAL_TZ)
-                    if dt > now_local:
-                        filtered_events.append((dt, e))
-
-            if filtered_events:
-                ev_options = {f"{e['away_team']} @ {e['home_team']} ({dt.strftime('%b %d - %I:%M %p')})": e['id'] for dt, e in filtered_events}
-                target_game_name = st.sidebar.selectbox("Select Matchup", list(ev_options.keys()))
-                target_event_id = ev_options[target_game_name]
-
-                selected_props = st.sidebar.multiselect(
-                    "Prop Markets",
-                    options=sport_info["props"],
-                    default=sport_info["props"][:3]
-                )
-                if not selected_props:
-                    st.sidebar.warning("Choose at least 1 prop.")
-                    st.stop()
-                queried_markets = ",".join(selected_props)
-                credit_cost = len(selected_props) * 2
-            else:
-                st.sidebar.info("No upcoming games found.")
-        else:
-            st.sidebar.info("No games listed.")
-    except Exception as e:
-        st.sidebar.error(f"Event error: {e}")
-
 st.sidebar.markdown("---")
-st.sidebar.markdown("**Filters & Bankroll**")
+st.sidebar.markdown("**Bankroll Settings**")
 bankroll = st.sidebar.number_input("Bankroll ($ CAD)", min_value=10.0, value=1000.0, step=50.0)
+min_win_prob = st.sidebar.slider("Highlight Bets with Prob ≥ %", min_value=40, max_value=80, value=50, step=5)
 
-min_edge = st.sidebar.slider(
-    "Min Edge / Hold (% EV)", 
-    min_value=-6.0, 
-    max_value=10.0, 
-    value=-4.5, 
-    step=0.25,
-    help="Set to -4.0% to -4.5% to see regular PlayNow favorites and high-confidence plays."
-)
-
-min_win_prob = st.sidebar.slider(
-    "Min Win Probability %", 
-    min_value=30, 
-    max_value=85, 
-    value=50, 
-    step=5,
-    help="Default 50%+ restricts output to strong favorites and coin-flips."
-)
-
-sort_by = st.sidebar.selectbox(
-    "Sort Results By", 
-    ["Highest Win Probability (Best Bets)", "Highest +EV Edge"]
-)
-kelly_fraction = st.sidebar.slider("Kelly Fraction", 0.05, 0.50, 0.25, step=0.05)
-
-run_scan = st.sidebar.button(f"⚡ Scan Board (~{credit_cost} Credits)", type="primary")
+run_scan = st.sidebar.button("⚡ Generate Complete Dossiers (~6 Credits)", type="primary")
 
 # --- MAIN DISPLAY ---
-st.markdown("<div class='terminal-title'>⚡ PYLOS PARLAYS <span class='accent-pill'>PLAYNOW SK</span></div>", unsafe_allow_html=True)
-st.markdown("<div class='terminal-sub'>MLB PITCHERS ➔ SHARP MARKET CONSENSUS ➔ SASKATCHEWAN TERMINAL</div>", unsafe_allow_html=True)
+st.markdown("<div class='terminal-title'>⚡ PYLOS PARLAYS <span class='accent-pill'>1-STOP COMMAND</span></div>", unsafe_allow_html=True)
+st.markdown("<div class='terminal-sub'>FULL MARKET MATRIX ➔ WEATHER ➔ TALE OF THE TAPE ➔ SHARP SASKATCHEWAN INTEL</div>", unsafe_allow_html=True)
 
 if "api_rem" not in st.session_state:
     st.session_state.api_rem = "---"
     st.session_state.api_used = "---"
-    st.session_state.opps = []
+    st.session_state.dossiers = []
 
 st.markdown(f"""
 <div class='metric-grid'>
@@ -396,326 +343,230 @@ st.markdown(f"""
 </div>
 """, unsafe_allow_html=True)
 
-# Main Processing Engine
+# Build Master Game Dossiers
 if run_scan:
-    st.session_state.opps = []
+    st.session_state.dossiers = []
     try:
-        with st.spinner("Analyzing market consensus and scraping probable pitchers..."):
-            if scan_mode == "📊 All Games (Mainlines)":
-                raw_events, rem, used = fetch_mainlines(sport_key, queried_markets)
-            else:
-                if not target_event_id:
-                    st.error("No game selected.")
-                    st.stop()
-                raw_data, rem, used = fetch_game_props(sport_key, target_event_id, queried_markets)
-                raw_events = [raw_data]
-
+        with st.spinner("Compiling full game dossier matrix, weather forecasts, and pitching intel..."):
+            raw_events, rem, used = fetch_mainlines(sport_key)
             st.session_state.api_rem = rem
             st.session_state.api_used = used
-            now_local = datetime.now(LOCAL_TZ)
 
-            # Fetch MLB Probable Pitchers (Free API)
-            active_target_date_str = now_local.strftime("%Y-%m-%d")
+            target_date_str = now_local.strftime("%Y-%m-%d")
             if "Tomorrow" in date_filter_mode and "Day After" not in date_filter_mode:
-                active_target_date_str = tomorrow_local.strftime("%Y-%m-%d")
+                target_date_str = tomorrow_local.strftime("%Y-%m-%d")
             elif "Day After Tomorrow" in date_filter_mode:
-                active_target_date_str = day_after_local.strftime("%Y-%m-%d")
+                target_date_str = day_after_local.strftime("%Y-%m-%d")
             elif date_filter_mode == "Pick Specific Date (Calendar)" and chosen_calendar_date:
-                active_target_date_str = chosen_calendar_date.strftime("%Y-%m-%d")
+                target_date_str = chosen_calendar_date.strftime("%Y-%m-%d")
 
-            pitcher_data = {}
+            intel_map = {}
             if "baseball" in sport_key:
-                pitcher_data = fetch_mlb_probable_pitchers(active_target_date_str)
+                intel_map = fetch_mlb_intel(target_date_str)
 
-            found_plays = []
             SHARP_KEYS = ["pinnacle", "betfair_ex_eu", "betonlineag", "coolbet", "unibet_eu", "betvictor"]
-
-            total_games_checked = 0
-            playnow_lines_found = 0
+            compiled_games = []
 
             for ev in raw_events:
                 commence_raw = ev.get("commence_time", "")
                 if commence_raw:
                     dt = datetime.fromisoformat(commence_raw.replace("Z", "+00:00")).astimezone(LOCAL_TZ)
-                    
                     if dt <= now_local:
                         continue
+                    if date_filter_mode == "Upcoming 24 Hours" and dt > now_local + timedelta(hours=24):
+                        continue
+                    elif "Tomorrow" in date_filter_mode and "Day After" not in date_filter_mode and dt.date() != tomorrow_local:
+                        continue
+                    elif "Day After Tomorrow" in date_filter_mode and dt.date() != day_after_local:
+                        continue
+                    elif date_filter_mode == "Pick Specific Date (Calendar)" and dt.date() != chosen_calendar_date:
+                        continue
 
-                    if date_filter_mode == "Upcoming 24 Hours":
-                        if dt > now_local + timedelta(hours=24):
-                            continue
-                    elif "Tomorrow" in date_filter_mode and "Day After" not in date_filter_mode:
-                        if dt.date() != tomorrow_local:
-                            continue
-                    elif "Day After Tomorrow" in date_filter_mode:
-                        if dt.date() != day_after_local:
-                            continue
-                    elif date_filter_mode == "Pick Specific Date (Calendar)":
-                        if dt.date() != chosen_calendar_date:
-                            continue
-
-                total_games_checked += 1
-                matchup = f"{ev.get('away_team')} @ {ev.get('home_team')}"
+                away_team = ev.get("away_team")
+                home_team = ev.get("home_team")
+                matchup = f"{away_team} @ {home_team}"
                 formatted_time = dt.strftime("%b %d - %I:%M %p")
-                bookmakers = ev.get("bookmakers", [])
 
-                pitcher_str = pitcher_data.get(matchup, "")
+                # Fetch Tale of the Tape & Weather
+                game_intel = intel_map.get(matchup, {
+                    "away_rec": "---", "home_rec": "---",
+                    "away_pitcher": "Starting Pitcher", "home_pitcher": "Starting Pitcher",
+                    "venue": f"{home_team} Stadium"
+                })
+                weather_info = fetch_weather(home_team)
+
+                # Devig consensus for all 3 markets
                 market_probs = {}
-                playnow_wagers = []
+                playnow_lines = {}
 
-                for bm in bookmakers:
-                    bm_key = bm.get("key", "").lower()
-                    is_sharp = any(k in bm_key for k in SHARP_KEYS)
+                for bm in ev.get("bookmakers", []):
+                    bm_k = bm.get("key", "").lower()
+                    is_sharp = any(k in bm_k for k in SHARP_KEYS)
 
-                    if is_sharp:
-                        for m in bm.get("markets", []):
-                            outcomes = m.get("outcomes", [])
-                            if len(outcomes) >= 2:
-                                raw_p = {o.get("description", "") + o["name"] + str(o.get("point", "")): 1.0 / o["price"] for o in outcomes if o.get("price", 0) > 1.0}
-                                total_vig = sum(raw_p.values())
-                                if total_vig > 0:
-                                    for o in outcomes:
-                                        desc = o.get("description", "")
-                                        pt = o.get("point", None)
-                                        ident = desc + o["name"] + str(pt if pt is not None else "")
-                                        norm_p = raw_p[ident] / total_vig
+                    for m in bm.get("markets", []):
+                        m_key = m.get("key") # h2h, spreads, totals
+                        outcomes = m.get("outcomes", [])
+                        if len(outcomes) >= 2:
+                            raw_p = {o["name"] + str(o.get("point", "")): 1.0 / o["price"] for o in outcomes if o.get("price", 0) > 1.0}
+                            tot = sum(raw_p.values())
+                            if tot > 0:
+                                for o in outcomes:
+                                    ident = m_key + "_" + o["name"] + str(o.get("point", ""))
+                                    if is_sharp:
                                         if ident not in market_probs:
                                             market_probs[ident] = []
-                                        market_probs[ident].append(norm_p)
+                                        market_probs[ident].append(raw_p[o["name"] + str(o.get("point", ""))] / tot)
+                                    if "playnow" in bm_k:
+                                        playnow_lines[ident] = {
+                                            "name": o["name"],
+                                            "point": o.get("point", None),
+                                            "price": o["price"],
+                                            "market": m_key
+                                        }
 
-                    if "playnow" in bm_key:
-                        for m in bm.get("markets", []):
-                            for o in m.get("outcomes", []):
-                                playnow_lines_found += 1
-                                p_desc = o.get("description", "")
-                                side = o.get("name")
-                                pt = o.get("point", None)
-                                label = f"{p_desc} {side} {pt}" if p_desc else f"{side} {f'({pt})' if pt is not None else ''}"
-                                ident = p_desc + side + str(pt if pt is not None else "")
+                compiled_games.append({
+                    "matchup": matchup,
+                    "away_team": away_team,
+                    "home_team": home_team,
+                    "time": formatted_time,
+                    "intel": game_intel,
+                    "weather": weather_info,
+                    "playnow": playnow_lines,
+                    "sharp_probs": market_probs
+                })
 
-                                playnow_wagers.append({
-                                    "ident": ident,
-                                    "display": label,
-                                    "price": o["price"],
-                                    "dec_price": o["price"],
-                                    "matchup": matchup,
-                                    "pitchers": pitcher_str,
-                                    "time": formatted_time
-                                })
-
-                for wager in playnow_wagers:
-                    id_k = wager["ident"]
-                    if id_k not in market_probs or len(market_probs[id_k]) == 0:
-                        continue
-
-                    fair_p = float(np.mean(market_probs[id_k]))
-                    win_prob_pct = fair_p * 100.0
-
-                    if win_prob_pct < min_win_prob:
-                        continue
-
-                    dec_odds = wager["price"]
-                    ev_pct = ((dec_odds * fair_p) - 1.0) * 100.0
-
-                    if ev_pct >= min_edge:
-                        rec_stake = calculate_kelly(fair_p, dec_odds, fraction=kelly_fraction)
-                        suggested_cash = round(rec_stake * bankroll, 2) if ev_pct >= 0 else round(0.01 * bankroll, 2)
-
-                        found_plays.append({
-                            "pick": wager["display"],
-                            "matchup": wager["matchup"],
-                            "pitchers": wager["pitchers"],
-                            "playnow_us": decimal_to_american(dec_odds),
-                            "playnow_dec": dec_odds,
-                            "fair_us": decimal_to_american(1.0 / fair_p),
-                            "fair_prob_num": win_prob_pct,
-                            "fair_prob": f"{round(win_prob_pct, 1)}%",
-                            "ev": round(ev_pct, 2),
-                            "stake": suggested_cash,
-                            "time": wager["time"]
-                        })
-
-            if sort_by == "Highest Win Probability (Best Bets)":
-                found_plays = sorted(found_plays, key=lambda x: x["fair_prob_num"], reverse=True)
+            st.session_state.dossiers = compiled_games
+            if compiled_games:
+                st.success(f"Built {len(compiled_games)} Full Game Dossiers for {date_filter_mode}!")
             else:
-                found_plays = sorted(found_plays, key=lambda x: x["ev"], reverse=True)
-
-            st.session_state.opps = found_plays
-
-            st.caption(f"Diagnostics: Scanned {total_games_checked} games | Analyzed {playnow_lines_found} PlayNow lines.")
-            if found_plays:
-                st.success(f"Loaded {len(found_plays)} qualified bets matching your criteria!")
-            else:
-                st.info("0 bets matched. Adjust your Min Edge slider or broaden the timeframe.")
+                st.info("No games matched your current schedule filters.")
 
     except Exception as ex:
-        st.error(f"Scan failed: {ex}")
+        st.error(f"Failed to compile dossiers: {ex}")
 
-# --- TABS: SINGLE BETS vs PARLAY BUILDER ---
-tab_singles, tab_parlays = st.tabs(["🟢 Single Value Plays", "⚡ Parlay Builder (Combine Bets)"])
+# Render Full Game Dossiers
+if st.session_state.dossiers:
+    for g in st.session_state.dossiers:
+        intel = g["intel"]
+        p_lines = g["playnow"]
+        s_probs = g["sharp_probs"]
 
-with tab_singles:
-    if st.session_state.opps:
-        for row in st.session_state.opps:
-            badge_style = "background: rgba(16, 185, 129, 0.15); color: #10b981; border: 1px solid #10b981;" if row['ev'] >= 0 else "background: rgba(56, 189, 248, 0.15); color: #38bdf8; border: 1px solid #0284c7;"
-            badge_text = f"+{row['ev']}% EDGE" if row['ev'] >= 0 else f"{row['ev']}% HOLD"
+        # Helper to extract market data
+        def get_line_data(m_key, side_name):
+            for k, val in p_lines.items():
+                if k.startswith(m_key) and side_name in val["name"]:
+                    dec = val["price"]
+                    prob_list = s_probs.get(k, [])
+                    fair_p = float(np.mean(prob_list)) if prob_list else 1.0 / dec
+                    edge = ((dec * fair_p) - 1.0) * 100
+                    pt_str = f" ({val['point']:+})" if val['point'] is not None else ""
+                    return {
+                        "odds": decimal_to_american(dec),
+                        "prob": f"{fair_p*100:.1f}%",
+                        "edge": f"+{edge:.1f}%" if edge >= 0 else f"{edge:.1f}%",
+                        "point": pt_str,
+                        "raw_prob": fair_p * 100
+                    }
+            return {"odds": "---", "prob": "---", "edge": "---", "point": "", "raw_prob": 0}
 
-            pitcher_html = f"<div class='pitcher-tag'>⚾ Probables: {row['pitchers']}</div>" if row.get('pitchers') else ""
-            rationale_html = generate_rationale(row['pick'], row['matchup'], row['fair_prob_num'], row['ev'], row['playnow_us'], row.get('pitchers', ''))
+        away_ml = get_line_data("h2h", g["away_team"])
+        home_ml = get_line_data("h2h", g["home_team"])
+        away_spread = get_line_data("spreads", g["away_team"])
+        home_spread = get_line_data("spreads", g["home_team"])
+        over_tot = get_line_data("totals", "Over")
+        under_tot = get_line_data("totals", "Under")
 
-            # Strictly unindented HTML block to prevent Markdown code box parsing
-            card_html = f"""<div class="wager-card">
-<div class="card-top">
+        # Synthesize System Read
+        top_play = "Neutral Board"
+        top_prob = 0
+        if home_ml["raw_prob"] > top_prob:
+            top_prob = home_ml["raw_prob"]
+            top_play = f"Back **{g['home_team']} ML** (Win Prob: {home_ml['prob']})"
+        if away_ml["raw_prob"] > top_prob:
+            top_prob = away_ml["raw_prob"]
+            top_play = f"Back **{g['away_team']} ML** (Win Prob: {away_ml['prob']})"
+
+        # Strictly flush HTML block
+        dossier_html = f"""<div class="game-dossier">
+<div class="dossier-header">
 <div>
-<span class="source-tag">PLAYNOW SK</span>
-<span style="font-size: 11px; color: #64748b; margin-left: 8px; font-family: 'JetBrains Mono';">{row['time']} SK</span>
+<div class="matchup-headline">{g['matchup']}</div>
+<div class="matchup-records">{g['away_team']} ({intel['away_rec']}) vs {g['home_team']} ({intel['home_rec']}) • 🏟️ {intel['venue']}</div>
 </div>
-<div class="edge-badge" style="{badge_style}">{badge_text}</div>
+<div class="weather-badge">🌤️ {g['weather']}</div>
 </div>
-<div class="match-label">{row['matchup']}</div>
-{pitcher_html}
-<div class="selection-label">{row['pick']}</div>
-<div class="odds-terminal">
-<div>
-<div class="terminal-lbl">PlayNow Odds</div>
-<div class="terminal-data" style="color:#10b981;">{row['playnow_us']}</div>
+
+<div class="tape-row">
+<div class="tape-col">⚾ <b>Away Starter:</b> {intel['away_pitcher']}</div>
+<div class="tape-col">⚾ <b>Home Starter:</b> {intel['home_pitcher']}</div>
 </div>
-<div>
-<div class="terminal-lbl">Sharp Fair</div>
-<div class="terminal-data">{row['fair_us']}</div>
-</div>
-<div>
-<div class="terminal-lbl">Win Prob</div>
-<div class="terminal-data" style="color:#38bdf8;">{row['fair_prob']}</div>
-</div>
-<div>
-<div class="terminal-lbl">Suggested Bet</div>
-<div class="terminal-data" style="color:#f59e0b;">${row['stake']}</div>
-</div>
-</div>
-<div class="rationale-box">
-💡 <b>Why the System Likes This:</b> {rationale_html}
+
+<table class="market-table">
+<thead>
+<tr>
+<th>Team / Market</th>
+<th>Moneyline (PlayNow / Fair)</th>
+<th>Spread / Run Line</th>
+<th>Game Total (O/U)</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td style="text-align:left; font-weight:700;">{g['away_team']}</td>
+<td><span class="highlight-edge">{away_ml['odds']}</span> ({away_ml['prob']})</td>
+<td>{away_spread['point']} {away_spread['odds']}</td>
+<td>Over {over_tot['point']} {over_tot['odds']}</td>
+</tr>
+<tr>
+<td style="text-align:left; font-weight:700;">{g['home_team']}</td>
+<td><span class="highlight-edge">{home_ml['odds']}</span> ({home_ml['prob']})</td>
+<td>{home_spread['point']} {home_spread['odds']}</td>
+<td>Under {under_tot['point']} {under_tot['odds']}</td>
+</tr>
+</tbody>
+</table>
+
+<div class="intel-box">
+💡 <b>System Intelligence & Game Read:</b> Scheduled for <b>{g['time']} SK</b>. Pitching duel features <b>{intel['away_pitcher']} vs. {intel['home_pitcher']}</b>. Weather conditions at first pitch stand at <b>{g['weather']}</b>. Strongest mathematical angle on the board: {top_play}.
 </div>
 </div>"""
 
-            st.markdown(card_html, unsafe_allow_html=True)
+        st.markdown(dossier_html, unsafe_allow_html=True)
 
-        # 1-Tap Google Sheets Logger
-        st.markdown("---")
-        st.markdown("### 📝 Quick-Log Wager to Google Sheet")
-        with st.form("quick_log_form"):
-            play_labels = [f"{o['matchup']} ➔ {o['pick']} ({o['playnow_us']}) | Prob: {o['fair_prob']}" for o in st.session_state.opps]
-            selected_idx = st.selectbox("Select Wager to Record", range(len(play_labels)), format_func=lambda x: play_labels[x])
-            active = st.session_state.opps[selected_idx]
+    # 1-Tap Google Sheets Logger for any match
+    st.markdown("---")
+    st.markdown("### 📝 Quick-Log Game Pick to Google Sheet")
+    with st.form("dossier_logger"):
+        match_names = [f"{d['matchup']} ({d['time']} SK)" for d in st.session_state.dossiers]
+        chosen_match_idx = st.selectbox("Select Matchup", range(len(match_names)), format_func=lambda x: match_names[x])
+        active_match = st.session_state.dossiers[chosen_match_idx]
 
-            c1, c2 = st.columns(2)
-            final_stake = c1.number_input("Actual Stake ($ CAD)", min_value=1.0, value=float(max(1.0, active["stake"])))
-            bet_status = c2.selectbox("Result", ["Open", "Won", "Lost", "Push"])
+        c1, c2, c3 = st.columns(3)
+        pick_selection = c1.text_input("Your Pick (e.g. Dodgers ML, Over 8.5)", value=f"{active_match['home_team']} ML")
+        wager_odds = c2.text_input("Odds Taken", value="-185")
+        bet_amount = c3.number_input("Wager ($ CAD)", min_value=1.0, value=10.0, step=5.0)
 
-            record_btn = st.form_submit_button("Record to Betting_Tracker Sheet", type="primary")
+        record_dossier_btn = st.form_submit_button("Record to Betting_Tracker Sheet", type="primary")
 
-            if record_btn:
-                try:
-                    sheet = conn.read(worksheet="Sheet1", ttl=0)
-                    new_row = pd.DataFrame([{
-                        "Date": datetime.now(LOCAL_TZ).strftime("%Y-%m-%d %I:%M %p"),
-                        "Matchup": active["matchup"],
-                        "Pick": active["pick"],
-                        "Sportsbook": "PlayNow SK",
-                        "Odds": active["playnow_us"],
-                        "Stake": final_stake,
-                        "EV_Percent": active["ev"],
-                        "Status": bet_status,
-                        "Notes": f"Fair: {active['fair_us']} ({active['fair_prob']})"
-                    }])
-                    updated = pd.concat([sheet, new_row], ignore_index=True) if not sheet.empty else new_row
-                    conn.update(worksheet="Sheet1", data=updated)
-                    st.success("Successfully logged to Google Sheet!")
-                except Exception as e:
-                    st.error(f"Sheet error: {e}")
-
-# --- PARLAY BUILDER TAB ---
-with tab_parlays:
-    st.markdown("### ⚡ Multi-Leg Parlay Architect")
-    st.caption("Select 2 to 3 high-probability wagers from your scan to form a combined plus-money ticket on PlayNow SK.")
-
-    if len(st.session_state.opps) >= 2:
-        parlay_choices = [f"{o['matchup']} ➔ {o['pick']} ({o['playnow_us']}) - {o['fair_prob']}" for o in st.session_state.opps]
-        selected_legs = st.multiselect("Select Parlay Legs (2 to 4)", options=parlay_choices, default=parlay_choices[:2])
-
-        if len(selected_legs) >= 2:
-            indices = [parlay_choices.index(choice) for choice in selected_legs]
-            chosen_data = [st.session_state.opps[i] for i in indices]
-
-            total_decimal_odds = 1.0
-            joint_prob = 1.0
-
-            for leg in chosen_data:
-                total_decimal_odds *= leg["playnow_dec"]
-                joint_prob *= (leg["fair_prob_num"] / 100.0)
-
-            parlay_us = decimal_to_american(total_decimal_odds)
-            parlay_win_prob_pct = round(joint_prob * 100.0, 1)
-
-            parlay_card_html = f"""<div class="wager-card" style="border: 2px solid #38bdf8;">
-<div class="card-top">
-<div>
-<span class="source-tag" style="background-color: #38bdf8; color: #021a2e;">PARLAY TICKET</span>
-<span style="font-size: 11px; color: #64748b; margin-left: 8px;">{len(selected_legs)} LEGS COMBINED</span>
-</div>
-</div>
-<div class="selection-label">Multi-Leg Parlay ({parlay_us})</div>
-<div class="odds-terminal">
-<div>
-<div class="terminal-lbl">Combined Odds</div>
-<div class="terminal-data" style="color:#10b981;">{parlay_us} ({total_decimal_odds:.2f})</div>
-</div>
-<div>
-<div class="terminal-lbl">Joint Win Prob</div>
-<div class="terminal-data" style="color:#38bdf8;">{parlay_win_prob_pct}%</div>
-</div>
-<div>
-<div class="terminal-lbl">Estimated Payout ($10)</div>
-<div class="terminal-data" style="color:#f59e0b;">${round(10 * total_decimal_odds, 2)}</div>
-</div>
-<div>
-<div class="terminal-lbl">Suggested Bet</div>
-<div class="terminal-data" style="color:#f59e0b;">$10.00</div>
-</div>
-</div>
-</div>"""
-
-            st.markdown(parlay_card_html, unsafe_allow_html=True)
-
-            with st.form("parlay_log_form"):
-                p_stake = st.number_input("Wager Amount ($ CAD)", min_value=1.0, value=10.0, step=5.0)
-                p_status = st.selectbox("Status", ["Open", "Won", "Lost", "Push"])
-                p_log_btn = st.form_submit_button("Record Parlay to Sheet", type="primary")
-
-                if p_log_btn:
-                    try:
-                        sheet = conn.read(worksheet="Sheet1", ttl=0)
-                        leg_summary = " + ".join([c["pick"] for c in chosen_data])
-                        new_row = pd.DataFrame([{
-                            "Date": datetime.now(LOCAL_TZ).strftime("%Y-%m-%d %I:%M %p"),
-                            "Matchup": f"{len(selected_legs)}-Leg Parlay",
-                            "Pick": leg_summary,
-                            "Sportsbook": "PlayNow SK",
-                            "Odds": parlay_us,
-                            "Stake": p_stake,
-                            "EV_Percent": "Parlay",
-                            "Status": p_status,
-                            "Notes": f"Joint Win Prob: {parlay_win_prob_pct}%"
-                        }])
-                        updated = pd.concat([sheet, new_row], ignore_index=True) if not sheet.empty else new_row
-                        conn.update(worksheet="Sheet1", data=updated)
-                        st.success("Parlay successfully logged to Betting_Tracker Sheet!")
-                    except Exception as e:
-                        st.error(f"Failed to record parlay: {e}")
-        else:
-            st.info("Select at least 2 legs to calculate parlay odds.")
-    else:
-        st.info("Run a scan on the Single Bets tab first to generate candidate legs.")
+        if record_dossier_btn:
+            try:
+                sheet = conn.read(worksheet="Sheet1", ttl=0)
+                new_row = pd.DataFrame([{
+                    "Date": datetime.now(LOCAL_TZ).strftime("%Y-%m-%d %I:%M %p"),
+                    "Matchup": active_match["matchup"],
+                    "Pick": pick_selection,
+                    "Sportsbook": "PlayNow SK",
+                    "Odds": wager_odds,
+                    "Stake": bet_amount,
+                    "EV_Percent": "Dossier Log",
+                    "Status": "Open",
+                    "Notes": f"Weather: {active_match['weather']} | Pitchers: {active_match['intel']['away_pitcher']} vs {active_match['intel']['home_pitcher']}"
+                }])
+                updated = pd.concat([sheet, new_row], ignore_index=True) if not sheet.empty else new_row
+                conn.update(worksheet="Sheet1", data=updated)
+                st.success("Successfully logged game dossier play to Google Sheets!")
+            except Exception as e:
+                st.error(f"Sheet error: {e}")
 
 st.markdown("---")
 with st.expander("📊 View Betting_Tracker Google Sheet"):
