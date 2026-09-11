@@ -2,7 +2,8 @@ import streamlit as st
 from streamlit_gsheets import GSheetsConnection
 import requests
 import pandas as pd
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
+from zoneinfo import ZoneInfo
 import numpy as np
 
 # --- PAGE CONFIG ---
@@ -149,6 +150,7 @@ st.markdown("""
 ODDS_API_KEY = st.secrets.get("ODDS_API_KEY", "")
 BASE_URL = "https://api.the-odds-api.com/v4/sports"
 conn = st.connection("gsheets", type=GSheetsConnection)
+LOCAL_TZ = ZoneInfo("America/Regina")
 
 def decimal_to_american(dec: float) -> str:
     if dec >= 2.0:
@@ -160,7 +162,7 @@ def calculate_kelly(fair_p: float, dec: float, fraction: float = 0.25) -> float:
     q = 1.0 - fair_p
     return max(0.0, ((b * fair_p - q) / b) * fraction)
 
-# Zero Credit Cost: fixtures are completely free
+# Zero Credit Cost: events list endpoint is free
 @st.cache_data(ttl=3600, show_spinner=False)
 def get_upcoming_events(sport_key: str):
     url = f"{BASE_URL}/{sport_key}/events"
@@ -168,6 +170,7 @@ def get_upcoming_events(sport_key: str):
     res.raise_for_status()
     return res.json()
 
+# 45 min cache to safeguard quota
 @st.cache_data(ttl=2700, show_spinner=False)
 def fetch_mainlines(sport_key: str, markets_str: str):
     url = f"{BASE_URL}/{sport_key}/odds"
@@ -221,10 +224,11 @@ selected_sport_label = st.sidebar.selectbox("Sport Slate", list(SPORTS_PRESETS.k
 sport_info = SPORTS_PRESETS[selected_sport_label]
 sport_key = sport_info["key"]
 
-target_date = st.sidebar.date_input(
-    "Game Date",
-    value=datetime.now(timezone.utc).date(),
-    help="Filter games scheduled on this specific calendar date"
+# Timeframe Filter in Local SK Time
+time_window = st.sidebar.selectbox(
+    "Game Timeframe",
+    ["Upcoming 12 Hours", "Upcoming 24 Hours", "Upcoming 48 Hours", "All Available Games"],
+    index=1
 )
 
 scan_mode = st.sidebar.radio("Scan Mode", ["📊 All Games (Mainlines)", "🎯 Prop Sniper (Token Safe)"])
@@ -232,6 +236,8 @@ scan_mode = st.sidebar.radio("Scan Mode", ["📊 All Games (Mainlines)", "🎯 P
 target_event_id = None
 queried_markets = ""
 credit_cost = 2
+
+now_local = datetime.now(LOCAL_TZ)
 
 if scan_mode == "📊 All Games (Mainlines)":
     main_selection = st.sidebar.multiselect("Markets", ["h2h (Moneyline)", "spreads", "totals"], default=["h2h (Moneyline)", "spreads", "totals"])
@@ -244,18 +250,17 @@ else:
     try:
         events = get_upcoming_events(sport_key)
         if events:
-            now_utc = datetime.now(timezone.utc)
             filtered_events = []
             for e in events:
                 commence_raw = e.get("commence_time", "")
                 if commence_raw:
-                    dt = datetime.fromisoformat(commence_raw.replace("Z", "+00:00"))
-                    if dt.date() == target_date and dt > now_utc:
-                        filtered_events.append(e)
+                    dt = datetime.fromisoformat(commence_raw.replace("Z", "+00:00")).astimezone(LOCAL_TZ)
+                    if dt > now_local:
+                        filtered_events.append((dt, e))
 
             if filtered_events:
-                ev_options = {f"{e['away_team']} @ {e['home_team']} ({e['commence_time'][11:16]} UTC)": e['id'] for e in filtered_events}
-                target_game_name = st.sidebar.selectbox("Select Upcoming Game", list(ev_options.keys()))
+                ev_options = {f"{e['away_team']} @ {e['home_team']} ({dt.strftime('%b %d - %I:%M %p')})": e['id'] for dt, e in filtered_events}
+                target_game_name = st.sidebar.selectbox("Select Matchup", list(ev_options.keys()))
                 target_event_id = ev_options[target_game_name]
 
                 selected_props = st.sidebar.multiselect(
@@ -264,48 +269,51 @@ else:
                     default=sport_info["props"][:3]
                 )
                 if not selected_props:
-                    st.sidebar.warning("Choose at least 1 prop type.")
+                    st.sidebar.warning("Choose at least 1 prop.")
                     st.stop()
                 queried_markets = ",".join(selected_props)
                 credit_cost = len(selected_props) * 2
             else:
-                st.sidebar.info(f"No upcoming games found for {target_date}.")
+                st.sidebar.info("No upcoming games found for this sport.")
         else:
             st.sidebar.info("No games listed.")
     except Exception as e:
         st.sidebar.error(f"Event error: {e}")
 
 st.sidebar.markdown("---")
-st.sidebar.markdown("**Bankroll & Strategy Filters**")
+st.sidebar.markdown("**Filters & Thresholds**")
 bankroll = st.sidebar.number_input("Bankroll ($ CAD)", min_value=10.0, value=1000.0, step=50.0)
 
-# Expanded Slider: Allows Negative Values for Best Market Lines / Low-Vig
+# Edge slider allowing negative margins to reveal best-priced favorites and coin-flips
 min_edge = st.sidebar.slider(
     "Min Edge (% EV)", 
-    min_value=-3.0, 
+    min_value=-6.0, 
     max_value=10.0, 
-    value=-1.0, 
+    value=-3.5, 
     step=0.25,
-    help="Set to -1.5% or -2.0% to see high-probability 'Good Bets' where PlayNow charges the absolute lowest hold."
+    help="Set around -3.5% to capture standard-vig PlayNow favorites and high-confidence picks."
 )
 
 min_win_prob = st.sidebar.slider(
     "Min Win Probability %", 
     min_value=30, 
-    max_value=75, 
+    max_value=85, 
     value=45, 
     step=5,
-    help="Filters out longshots. Set to 50%+ for strong favorites and coin-flips."
+    help="Set to 50%+ for favorites and coin-flips; 60%+ for heavy favorites."
 )
 
-sort_by = st.sidebar.selectbox("Sort Results By", ["Highest Win Probability (Best Bets)", "Highest +EV Edge"])
+sort_by = st.sidebar.selectbox(
+    "Sort Results By", 
+    ["Highest Win Probability (Best Bets)", "Highest +EV Edge"]
+)
 kelly_fraction = st.sidebar.slider("Kelly Fraction", 0.05, 0.50, 0.25, step=0.05)
 
 run_scan = st.sidebar.button(f"⚡ Scan Board (~{credit_cost} Credits)", type="primary")
 
 # --- MAIN DISPLAY ---
 st.markdown("<div class='terminal-title'>⚡ PYLOS PARLAYS <span class='accent-pill'>PLAYNOW SK</span></div>", unsafe_allow_html=True)
-st.markdown("<div class='terminal-sub'>SHARP MARKET CONSENSUS ➔ PLAYNOW VALUE & WIN PROB TERMINAL</div>", unsafe_allow_html=True)
+st.markdown("<div class='terminal-sub'>SHARP MARKET CONSENSUS ➔ PLAYNOW VALUE & PROBABILITY TERMINAL</div>", unsafe_allow_html=True)
 
 if "api_rem" not in st.session_state:
     st.session_state.api_rem = "---"
@@ -325,7 +333,7 @@ st.markdown(f"""
 </div>
 """, unsafe_allow_html=True)
 
-# Main Multi-Book Consensus & Edge Detection
+# Main Processing Engine
 if run_scan:
     st.session_state.opps = []
     try:
@@ -334,37 +342,49 @@ if run_scan:
                 raw_events, rem, used = fetch_mainlines(sport_key, queried_markets)
             else:
                 if not target_event_id:
-                    st.error("No valid game selected.")
+                    st.error("No game selected.")
                     st.stop()
                 raw_data, rem, used = fetch_game_props(sport_key, target_event_id, queried_markets)
                 raw_events = [raw_data]
 
             st.session_state.api_rem = rem
             st.session_state.api_used = used
-            now_utc = datetime.now(timezone.utc)
-            found_plays = []
+            now_local = datetime.now(LOCAL_TZ)
 
-            # Sharp Market Makers to build consensus
+            # Determine maximum cutoff window
+            window_hours = 9999
+            if time_window == "Upcoming 12 Hours":
+                window_hours = 12
+            elif time_window == "Upcoming 24 Hours":
+                window_hours = 24
+            elif time_window == "Upcoming 48 Hours":
+                window_hours = 48
+            cutoff_dt = now_local + timedelta(hours=window_hours)
+
+            found_plays = []
             SHARP_KEYS = ["pinnacle", "betfair_ex_eu", "betonlineag", "coolbet", "unibet_eu", "betvictor"]
+
+            total_games_checked = 0
+            playnow_lines_found = 0
 
             for ev in raw_events:
                 commence_raw = ev.get("commence_time", "")
                 if commence_raw:
-                    commence_dt = datetime.fromisoformat(commence_raw.replace("Z", "+00:00"))
-                    if commence_dt.date() != target_date or commence_dt <= now_utc:
+                    dt = datetime.fromisoformat(commence_raw.replace("Z", "+00:00")).astimezone(LOCAL_TZ)
+                    # Filter out games already started or outside the chosen window
+                    if dt <= now_local or dt > cutoff_dt:
                         continue
 
+                total_games_checked += 1
                 matchup = f"{ev.get('away_team')} @ {ev.get('home_team')}"
+                formatted_time = dt.strftime("%b %d - %I:%M %p")
                 bookmakers = ev.get("bookmakers", [])
 
-                # Aggregated market probabilities {ident: [prob_list]}
                 market_probs = {}
                 playnow_wagers = []
 
                 for bm in bookmakers:
                     bm_key = bm.get("key", "").lower()
-
-                    # Aggregate from all sharp market books available
                     is_sharp = any(k in bm_key for k in SHARP_KEYS)
 
                     if is_sharp:
@@ -383,10 +403,10 @@ if run_scan:
                                             market_probs[ident] = []
                                         market_probs[ident].append(norm_p)
 
-                    # Target: PlayNow SK
                     if "playnow" in bm_key:
                         for m in bm.get("markets", []):
                             for o in m.get("outcomes", []):
+                                playnow_lines_found += 1
                                 p_desc = o.get("description", "")
                                 side = o.get("name")
                                 pt = o.get("point", None)
@@ -398,31 +418,28 @@ if run_scan:
                                     "display": label,
                                     "price": o["price"],
                                     "matchup": matchup,
-                                    "time": commence_raw
+                                    "time": formatted_time
                                 })
 
-                # Consensus Math Evaluation
                 for wager in playnow_wagers:
                     id_k = wager["ident"]
                     if id_k not in market_probs or len(market_probs[id_k]) == 0:
                         continue
 
-                    # Average the devigged probabilities from sharp books
                     fair_p = float(np.mean(market_probs[id_k]))
-                    
-                    # 1. Check Win Probability Floor
                     win_prob_pct = fair_p * 100.0
+
+                    # 1. Win Probability Floor
                     if win_prob_pct < min_win_prob:
                         continue
 
                     dec_odds = wager["price"]
                     ev_pct = ((dec_odds * fair_p) - 1.0) * 100.0
 
-                    # 2. Check Edge Threshold (can be negative for low-vig favorites)
+                    # 2. Edge / Hold Threshold
                     if ev_pct >= min_edge:
                         rec_stake = calculate_kelly(fair_p, dec_odds, fraction=kelly_fraction)
-                        # For negative EV, recommend flat unit or zero
-                        dollars = round(rec_stake * bankroll, 2) if ev_pct >= 0 else round(0.01 * bankroll, 2)
+                        suggested_cash = round(rec_stake * bankroll, 2) if ev_pct >= 0 else round(0.01 * bankroll, 2)
 
                         found_plays.append({
                             "pick": wager["display"],
@@ -432,31 +449,31 @@ if run_scan:
                             "fair_prob_num": win_prob_pct,
                             "fair_prob": f"{round(win_prob_pct, 1)}%",
                             "ev": round(ev_pct, 2),
-                            "stake": dollars,
-                            "time": wager["time"][:16].replace("T", " ")
+                            "stake": suggested_cash,
+                            "time": wager["time"]
                         })
 
-            # Sorting preference
             if sort_by == "Highest Win Probability (Best Bets)":
                 found_plays = sorted(found_plays, key=lambda x: x["fair_prob_num"], reverse=True)
             else:
                 found_plays = sorted(found_plays, key=lambda x: x["ev"], reverse=True)
 
             st.session_state.opps = found_plays
+
+            st.caption(f"Diagnostics: Scanned {total_games_checked} games in timeframe | Found {playnow_lines_found} total PlayNow lines.")
             if found_plays:
-                st.success(f"Generated {len(found_plays)} qualified betting opportunities on PlayNow SK for {target_date}!")
+                st.success(f"Loaded {len(found_plays)} qualified bets matching your criteria!")
             else:
-                st.info(f"No plays met the criteria. Try adjusting the Min Edge to -2.0% or lowering the Min Win Probability.")
+                st.info(f"0 bets matched. Try sliding 'Min Edge' to -4.5% or lowering 'Min Win Probability' to 40%.")
 
     except Exception as ex:
         st.error(f"Scan failed: {ex}")
 
-# Render Actionable Wager Cards
+# Render Wager Cards
 if st.session_state.opps:
-    st.markdown("### 🟢 Qualified Value Plays")
+    st.markdown("### 🟢 Qualified Bets on PlayNow SK")
     for row in st.session_state.opps:
-        # Dynamic edge badge coloring (Green for +EV, Blue for Low-Hold High Prob)
-        badge_style = "background: rgba(56, 189, 248, 0.15); color: #38bdf8; border: 1px solid #0284c7;" if row['ev'] >= 0 else "background: rgba(148, 163, 184, 0.15); color: #94a3b8; border: 1px solid #475569;"
+        badge_style = "background: rgba(16, 185, 129, 0.15); color: #10b981; border: 1px solid #10b981;" if row['ev'] >= 0 else "background: rgba(56, 189, 248, 0.15); color: #38bdf8; border: 1px solid #0284c7;"
         badge_text = f"+{row['ev']}% EDGE" if row['ev'] >= 0 else f"{row['ev']}% HOLD"
 
         st.markdown(f"""
@@ -464,7 +481,7 @@ if st.session_state.opps:
             <div class="card-top">
                 <div>
                     <span class="source-tag">PLAYNOW SK</span>
-                    <span style="font-size: 11px; color: #64748b; margin-left: 8px; font-family: 'JetBrains Mono';">{row['time']} UTC</span>
+                    <span style="font-size: 11px; color: #64748b; margin-left: 8px; font-family: 'JetBrains Mono';">{row['time']} SK</span>
                 </div>
                 <div class="edge-badge" style="{badge_style}">{badge_text}</div>
             </div>
@@ -476,7 +493,7 @@ if st.session_state.opps:
                     <div class="terminal-data" style="color:#10b981;">{row['playnow_us']}</div>
                 </div>
                 <div>
-                    <div class="terminal-lbl">Market Fair</div>
+                    <div class="terminal-lbl">Sharp Fair</div>
                     <div class="terminal-data">{row['fair_us']}</div>
                 </div>
                 <div>
@@ -509,7 +526,7 @@ if st.session_state.opps:
             try:
                 sheet = conn.read(worksheet="Sheet1", ttl=0)
                 new_row = pd.DataFrame([{
-                    "Date": datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC"),
+                    "Date": datetime.now(LOCAL_TZ).strftime("%Y-%m-%d %I:%M %p"),
                     "Matchup": active["matchup"],
                     "Pick": active["pick"],
                     "Sportsbook": "PlayNow SK",
@@ -521,9 +538,9 @@ if st.session_state.opps:
                 }])
                 updated = pd.concat([sheet, new_row], ignore_index=True) if not sheet.empty else new_row
                 conn.update(worksheet="Sheet1", data=updated)
-                st.success("Successfully written to Google Sheets!")
+                st.success("Successfully logged to Google Sheet!")
             except Exception as e:
-                st.error(f"Sheet write error: {e}")
+                st.error(f"Sheet error: {e}")
 
 st.markdown("---")
 with st.expander("📊 View Betting_Tracker Google Sheet"):
