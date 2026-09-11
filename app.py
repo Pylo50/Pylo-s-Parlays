@@ -39,7 +39,18 @@ def fetch_odds_cached(sport_key: str, market_key: str, regions: str = "us"):
     used = response.headers.get("x-requests-used", "Unknown")
     return response.json(), remaining, used
 
+# --- SIDEBAR SETTINGS ---
+
 st.sidebar.title("Odds Scanner")
+
+region_options = {
+    "Global / Bet365 (EU)": "eu",
+    "US Books (DraftKings, FanDuel, BetMGM)": "us",
+    "UK Books / Bet365 (UK)": "uk",
+    "Combined US + Bet365 (Cost: 2 Credits)": "us,eu",
+}
+selected_region_label = st.sidebar.selectbox("Bookmaker Region", list(region_options.keys()))
+region_key = region_options[selected_region_label]
 
 sport_options = {
     "MLB": "baseball_mlb",
@@ -51,7 +62,6 @@ sport_options = {
     "EPL": "soccer_epl",
     "UFC / MMA": "mma_mixed_martial_arts",
 }
-
 selected_sport_label = st.sidebar.selectbox("Sport", list(sport_options.keys()))
 sport_key = sport_options[selected_sport_label]
 
@@ -69,7 +79,10 @@ total_bankroll = st.sidebar.number_input("Total Bankroll ($)", min_value=10.0, v
 kelly_fraction = st.sidebar.slider("Kelly Fraction", min_value=0.05, max_value=1.0, value=0.25, step=0.05)
 min_ev = st.sidebar.slider("Minimum +EV %", min_value=0.0, max_value=15.0, value=0.5, step=0.25)
 
-scan_clicked = st.sidebar.button("Scan Odds (Cost: 1 Credit)", type="primary")
+credit_cost = 2 if "," in region_key else 1
+scan_clicked = st.sidebar.button(f"Scan Odds (Cost: {credit_cost} Credit{'s' if credit_cost > 1 else ''})", type="primary")
+
+# --- MAIN DASHBOARD ---
 
 st.title("SharpOdds Live +EV Dashboard")
 
@@ -80,8 +93,8 @@ if "events_data" not in st.session_state:
 
 if scan_clicked:
     try:
-        with st.spinner(f"Fetching fresh {selected_sport_label} lines..."):
-            data, rem, used = fetch_odds_cached(sport_key, market_key)
+        with st.spinner(f"Fetching fresh {selected_sport_label} lines ({selected_region_label})..."):
+            data, rem, used = fetch_odds_cached(sport_key, market_key, regions=region_key)
             st.session_state.events_data = data
             st.session_state.api_remaining = rem
             st.session_state.api_used = used
@@ -105,7 +118,6 @@ if st.session_state.events_data:
         if not bookmakers:
             continue
 
-        # Step 1: Collect fair probabilities across books for this market
         market_devigged_probs = {}
         book_offers = []
 
@@ -119,7 +131,7 @@ if st.session_state.events_data:
                 if len(outcomes) < 2:
                     continue
 
-                # Strip vig for this specific book
+                # Multiplicative devig per bookmaker
                 raw_implied = {o["name"]: 1.0 / o["price"] for o in outcomes if o.get("price", 0) > 1.0}
                 total_vig = sum(raw_implied.values())
                 if total_vig <= 0:
@@ -139,14 +151,12 @@ if st.session_state.events_data:
                         "time": commence_time
                     })
 
-        # Step 2: Compute consensus fair probability per outcome
         consensus_probs = {
             bet: sum(probs) / len(probs)
             for bet, probs in market_devigged_probs.items()
-            if len(probs) >= 2  # Requires at least 2 books to establish consensus
+            if len(probs) >= 2
         }
 
-        # Step 3: Compare retail books against consensus
         for offer in book_offers:
             bet_name = offer["bet"]
             if bet_name not in consensus_probs:
@@ -218,9 +228,11 @@ if st.session_state.events_data:
                 except Exception as e:
                     st.error(f"Error logging to Google Sheets: {e}")
     else:
-        st.info("No bets currently meet the minimum +EV threshold. Try setting Min +EV to 0.0 or scanning another market.")
+        st.info("No bets currently meet the minimum +EV threshold. Try setting Min +EV to 0.0 or scanning another market/region.")
 else:
-    st.info("Select a sport and market in the sidebar, then click 'Scan Odds' to retrieve live lines.")
+    st.info("Select your region, sport, and market in the sidebar, then click 'Scan Odds'.")
+
+# --- TRACKER HISTORY SECTION ---
 
 st.markdown("---")
 with st.expander("View Betting_Tracker Google Sheet Log"):
