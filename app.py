@@ -3,6 +3,7 @@ from streamlit_gsheets import GSheetsConnection
 import requests
 import pandas as pd
 from datetime import datetime, timezone
+import numpy as np
 
 # --- PAGE CONFIG ---
 st.set_page_config(
@@ -20,27 +21,19 @@ st.markdown("""
     html, body, [class*="css"] {
         font-family: 'Plus Jakarta Sans', -apple-system, BlinkMacSystemFont, sans-serif;
     }
-
-    /* Main App Background */
     .stApp {
         background: radial-gradient(circle at 15% 15%, #0f172a 0%, #070a12 85%);
         color: #f1f5f9;
     }
-
-    /* Sidebar Styling */
     section[data-testid="stSidebar"] {
         background-color: #0b0f19 !important;
         border-right: 1px solid #1e293b;
     }
-
-    /* Header Accent Title */
     .terminal-title {
-        font-family: 'Plus Jakarta Sans', sans-serif;
         font-weight: 800;
         font-size: 28px;
         letter-spacing: -0.5px;
         color: #ffffff;
-        margin-bottom: 0px;
     }
     .accent-pill {
         background: linear-gradient(135deg, #10b981 0%, #059669 100%);
@@ -61,8 +54,6 @@ st.markdown("""
         margin-top: 4px;
         margin-bottom: 18px;
     }
-
-    /* Metric Stat Cubes */
     .metric-grid {
         display: grid;
         grid-template-columns: repeat(2, 1fr);
@@ -91,8 +82,6 @@ st.markdown("""
         color: #64748b;
         margin-top: 2px;
     }
-
-    /* Opportunity Cards */
     .wager-card {
         background: linear-gradient(145deg, rgba(15, 23, 42, 0.9) 0%, rgba(11, 15, 25, 0.95) 100%);
         border: 1px solid #10b981;
@@ -100,7 +89,6 @@ st.markdown("""
         padding: 18px;
         margin-bottom: 14px;
         box-shadow: 0 0 18px rgba(16, 185, 129, 0.15);
-        transition: transform 0.15s ease-in-out;
     }
     .card-top {
         display: flex;
@@ -116,12 +104,8 @@ st.markdown("""
         font-size: 11px;
         padding: 3px 8px;
         border-radius: 4px;
-        letter-spacing: 0.5px;
     }
     .edge-badge {
-        background: rgba(56, 189, 248, 0.12);
-        color: #38bdf8;
-        border: 1px solid #0284c7;
         font-family: 'JetBrains Mono', monospace;
         font-weight: 800;
         font-size: 13px;
@@ -131,17 +115,13 @@ st.markdown("""
     .match-label {
         font-size: 14px;
         color: #94a3b8;
-        margin-bottom: 2px;
     }
     .selection-label {
         font-size: 19px;
         font-weight: 800;
         color: #ffffff;
-        letter-spacing: -0.3px;
         margin-bottom: 12px;
     }
-
-    /* 4-Column Terminal Odds Display */
     .odds-terminal {
         display: grid;
         grid-template-columns: repeat(4, 1fr);
@@ -155,7 +135,6 @@ st.markdown("""
     .terminal-lbl {
         font-size: 10px;
         text-transform: uppercase;
-        letter-spacing: 0.5px;
         color: #64748b;
     }
     .terminal-data {
@@ -163,14 +142,6 @@ st.markdown("""
         font-size: 14px;
         font-weight: 700;
         margin-top: 3px;
-    }
-
-    /* Quick Logger Box */
-    div[data-testid="stForm"] {
-        background: rgba(15, 23, 42, 0.6);
-        border: 1px solid #1e293b;
-        border-radius: 12px;
-        padding: 16px;
     }
 </style>
 """, unsafe_allow_html=True)
@@ -189,7 +160,7 @@ def calculate_kelly(fair_p: float, dec: float, fraction: float = 0.25) -> float:
     q = 1.0 - fair_p
     return max(0.0, ((b * fair_p - q) / b) * fraction)
 
-# Zero Credit Cost: browse schedules for free
+# Zero Credit Cost: fixtures are completely free
 @st.cache_data(ttl=3600, show_spinner=False)
 def get_upcoming_events(sport_key: str):
     url = f"{BASE_URL}/{sport_key}/events"
@@ -197,7 +168,6 @@ def get_upcoming_events(sport_key: str):
     res.raise_for_status()
     return res.json()
 
-# 45-min cache to preserve quota
 @st.cache_data(ttl=2700, show_spinner=False)
 def fetch_mainlines(sport_key: str, markets_str: str):
     url = f"{BASE_URL}/{sport_key}/odds"
@@ -224,7 +194,6 @@ def fetch_game_props(sport_key: str, event_id: str, markets_csv: str):
     res.raise_for_status()
     return res.json(), res.headers.get("x-requests-remaining", "N/A"), res.headers.get("x-requests-used", "N/A")
 
-# --- SPORT CONFIGURATIONS ---
 SPORTS_PRESETS = {
     "⚾ MLB Baseball": {
         "key": "baseball_mlb",
@@ -245,14 +214,13 @@ SPORTS_PRESETS = {
 }
 
 # --- SIDEBAR CONTROLS ---
-st.sidebar.markdown("<h3 style='margin-bottom:0px; color:#fff;'>⚡ PYLOS TERMINAL</h3>", unsafe_allow_html=True)
-st.sidebar.caption("Benchmark: **Pinnacle** | Target: **PlayNow SK**")
+st.sidebar.markdown("<h3 style='color:#fff;'>⚡ PYLOS TERMINAL</h3>", unsafe_allow_html=True)
+st.sidebar.caption("Benchmark: **Sharp Consensus** | Target: **PlayNow SK**")
 
 selected_sport_label = st.sidebar.selectbox("Sport Slate", list(SPORTS_PRESETS.keys()))
 sport_info = SPORTS_PRESETS[selected_sport_label]
 sport_key = sport_info["key"]
 
-# Dedicated Calendar Date Filter
 target_date = st.sidebar.date_input(
     "Game Date",
     value=datetime.now(timezone.utc).date(),
@@ -262,7 +230,6 @@ target_date = st.sidebar.date_input(
 scan_mode = st.sidebar.radio("Scan Mode", ["📊 All Games (Mainlines)", "🎯 Prop Sniper (Token Safe)"])
 
 target_event_id = None
-target_game_name = ""
 queried_markets = ""
 credit_cost = 2
 
@@ -278,7 +245,6 @@ else:
         events = get_upcoming_events(sport_key)
         if events:
             now_utc = datetime.now(timezone.utc)
-            # Filter events matching the selected date that haven't started yet
             filtered_events = []
             for e in events:
                 commence_raw = e.get("commence_time", "")
@@ -303,34 +269,43 @@ else:
                 queried_markets = ",".join(selected_props)
                 credit_cost = len(selected_props) * 2
             else:
-                st.sidebar.info(f"No upcoming unstarted games found for {target_date}.")
+                st.sidebar.info(f"No upcoming games found for {target_date}.")
         else:
             st.sidebar.info("No games listed.")
     except Exception as e:
         st.sidebar.error(f"Event error: {e}")
 
 st.sidebar.markdown("---")
-st.sidebar.markdown("**Math & Bankroll Filters**")
+st.sidebar.markdown("**Bankroll & Strategy Filters**")
 bankroll = st.sidebar.number_input("Bankroll ($ CAD)", min_value=10.0, value=1000.0, step=50.0)
 
-# Default 40% Win Probability Slider
-min_win_prob = st.sidebar.slider(
-    "Min Win Probability %", 
-    min_value=15, 
-    max_value=65, 
-    value=40, 
-    step=5,
-    help="Default 40% filters out deep longshots while preserving live underdogs."
+# Expanded Slider: Allows Negative Values for Best Market Lines / Low-Vig
+min_edge = st.sidebar.slider(
+    "Min Edge (% EV)", 
+    min_value=-3.0, 
+    max_value=10.0, 
+    value=-1.0, 
+    step=0.25,
+    help="Set to -1.5% or -2.0% to see high-probability 'Good Bets' where PlayNow charges the absolute lowest hold."
 )
 
-min_edge = st.sidebar.slider("Min Edge (+EV %)", 0.0, 10.0, 0.5, step=0.25)
-kelly_fraction = st.sidebar.slider("Kelly Fraction", 0.05, 0.50, 0.25, step=0.05, help="0.25 = Quarter Kelly sizing")
+min_win_prob = st.sidebar.slider(
+    "Min Win Probability %", 
+    min_value=30, 
+    max_value=75, 
+    value=45, 
+    step=5,
+    help="Filters out longshots. Set to 50%+ for strong favorites and coin-flips."
+)
 
-run_scan = st.sidebar.button(f"⚡ Scan Odds (~{credit_cost} Credits)", type="primary")
+sort_by = st.sidebar.selectbox("Sort Results By", ["Highest Win Probability (Best Bets)", "Highest +EV Edge"])
+kelly_fraction = st.sidebar.slider("Kelly Fraction", 0.05, 0.50, 0.25, step=0.05)
 
-# --- MAIN VIEWPORT ---
+run_scan = st.sidebar.button(f"⚡ Scan Board (~{credit_cost} Credits)", type="primary")
+
+# --- MAIN DISPLAY ---
 st.markdown("<div class='terminal-title'>⚡ PYLOS PARLAYS <span class='accent-pill'>PLAYNOW SK</span></div>", unsafe_allow_html=True)
-st.markdown("<div class='terminal-sub'>PINNACLE SHARP DEVIG ➔ SASKATCHEWAN VALUE TERMINAL</div>", unsafe_allow_html=True)
+st.markdown("<div class='terminal-sub'>SHARP MARKET CONSENSUS ➔ PLAYNOW VALUE & WIN PROB TERMINAL</div>", unsafe_allow_html=True)
 
 if "api_rem" not in st.session_state:
     st.session_state.api_rem = "---"
@@ -350,16 +325,16 @@ st.markdown(f"""
 </div>
 """, unsafe_allow_html=True)
 
-# Main Processing Loop
+# Main Multi-Book Consensus & Edge Detection
 if run_scan:
     st.session_state.opps = []
     try:
-        with st.spinner("Crunching sharp consensus and purging past/in-game lines..."):
+        with st.spinner("Analyzing market consensus across sharp books..."):
             if scan_mode == "📊 All Games (Mainlines)":
                 raw_events, rem, used = fetch_mainlines(sport_key, queried_markets)
             else:
                 if not target_event_id:
-                    st.error("No valid game selected for this date.")
+                    st.error("No valid game selected.")
                     st.stop()
                 raw_data, rem, used = fetch_game_props(sport_key, target_event_id, queried_markets)
                 raw_events = [raw_data]
@@ -369,31 +344,30 @@ if run_scan:
             now_utc = datetime.now(timezone.utc)
             found_plays = []
 
+            # Sharp Market Makers to build consensus
+            SHARP_KEYS = ["pinnacle", "betfair_ex_eu", "betonlineag", "coolbet", "unibet_eu", "betvictor"]
+
             for ev in raw_events:
-                # 1. Date and Pre-Game Filter
                 commence_raw = ev.get("commence_time", "")
                 if commence_raw:
                     commence_dt = datetime.fromisoformat(commence_raw.replace("Z", "+00:00"))
-                    
-                    # Filter by chosen calendar date
-                    if commence_dt.date() != target_date:
-                        continue
-                    
-                    # Block games that have already started
-                    if commence_dt <= now_utc:
+                    if commence_dt.date() != target_date or commence_dt <= now_utc:
                         continue
 
                 matchup = f"{ev.get('away_team')} @ {ev.get('home_team')}"
                 bookmakers = ev.get("bookmakers", [])
 
-                pinnacle_fair = {}
+                # Aggregated market probabilities {ident: [prob_list]}
+                market_probs = {}
                 playnow_wagers = []
 
                 for bm in bookmakers:
                     bm_key = bm.get("key", "").lower()
 
-                    # Sharp Benchmark: Pinnacle
-                    if "pinnacle" in bm_key:
+                    # Aggregate from all sharp market books available
+                    is_sharp = any(k in bm_key for k in SHARP_KEYS)
+
+                    if is_sharp:
                         for m in bm.get("markets", []):
                             outcomes = m.get("outcomes", [])
                             if len(outcomes) >= 2:
@@ -404,10 +378,13 @@ if run_scan:
                                         desc = o.get("description", "")
                                         pt = o.get("point", None)
                                         ident = desc + o["name"] + str(pt if pt is not None else "")
-                                        pinnacle_fair[ident] = raw_p[ident] / total_vig
+                                        norm_p = raw_p[ident] / total_vig
+                                        if ident not in market_probs:
+                                            market_probs[ident] = []
+                                        market_probs[ident].append(norm_p)
 
                     # Target: PlayNow SK
-                    elif "playnow" in bm_key:
+                    if "playnow" in bm_key:
                         for m in bm.get("markets", []):
                             for o in m.get("outcomes", []):
                                 p_desc = o.get("description", "")
@@ -419,55 +396,69 @@ if run_scan:
                                 playnow_wagers.append({
                                     "ident": ident,
                                     "display": label,
-                                    "subject": p_desc if p_desc else matchup,
                                     "price": o["price"],
                                     "matchup": matchup,
                                     "time": commence_raw
                                 })
 
-                # Filter & Compute Edge
+                # Consensus Math Evaluation
                 for wager in playnow_wagers:
                     id_k = wager["ident"]
-                    if id_k not in pinnacle_fair:
+                    if id_k not in market_probs or len(market_probs[id_k]) == 0:
                         continue
 
-                    fair_p = pinnacle_fair[id_k]
+                    # Average the devigged probabilities from sharp books
+                    fair_p = float(np.mean(market_probs[id_k]))
                     
-                    # Enforce Minimum Win Probability Cutoff (Default 40%)
-                    if (fair_p * 100.0) < min_win_prob:
+                    # 1. Check Win Probability Floor
+                    win_prob_pct = fair_p * 100.0
+                    if win_prob_pct < min_win_prob:
                         continue
 
                     dec_odds = wager["price"]
                     ev_pct = ((dec_odds * fair_p) - 1.0) * 100.0
 
-                    # Enforce Edge Threshold
+                    # 2. Check Edge Threshold (can be negative for low-vig favorites)
                     if ev_pct >= min_edge:
                         rec_stake = calculate_kelly(fair_p, dec_odds, fraction=kelly_fraction)
+                        # For negative EV, recommend flat unit or zero
+                        dollars = round(rec_stake * bankroll, 2) if ev_pct >= 0 else round(0.01 * bankroll, 2)
+
                         found_plays.append({
-                            "subject": wager["subject"],
                             "pick": wager["display"],
                             "matchup": wager["matchup"],
                             "playnow_us": decimal_to_american(dec_odds),
                             "fair_us": decimal_to_american(1.0 / fair_p),
-                            "fair_prob": f"{round(fair_p * 100, 1)}%",
+                            "fair_prob_num": win_prob_pct,
+                            "fair_prob": f"{round(win_prob_pct, 1)}%",
                             "ev": round(ev_pct, 2),
-                            "stake": round(rec_stake * bankroll, 2),
+                            "stake": dollars,
                             "time": wager["time"][:16].replace("T", " ")
                         })
 
+            # Sorting preference
+            if sort_by == "Highest Win Probability (Best Bets)":
+                found_plays = sorted(found_plays, key=lambda x: x["fair_prob_num"], reverse=True)
+            else:
+                found_plays = sorted(found_plays, key=lambda x: x["ev"], reverse=True)
+
             st.session_state.opps = found_plays
             if found_plays:
-                st.success(f"Discovered {len(found_plays)} high-probability +EV edges on PlayNow SK for {target_date}!")
+                st.success(f"Generated {len(found_plays)} qualified betting opportunities on PlayNow SK for {target_date}!")
             else:
-                st.info(f"No plays met both the +EV threshold and the {min_win_prob}% win probability floor for {target_date}.")
+                st.info(f"No plays met the criteria. Try adjusting the Min Edge to -2.0% or lowering the Min Win Probability.")
 
     except Exception as ex:
         st.error(f"Scan failed: {ex}")
 
-# Render Wager Cards
+# Render Actionable Wager Cards
 if st.session_state.opps:
     st.markdown("### 🟢 Qualified Value Plays")
     for row in st.session_state.opps:
+        # Dynamic edge badge coloring (Green for +EV, Blue for Low-Hold High Prob)
+        badge_style = "background: rgba(56, 189, 248, 0.15); color: #38bdf8; border: 1px solid #0284c7;" if row['ev'] >= 0 else "background: rgba(148, 163, 184, 0.15); color: #94a3b8; border: 1px solid #475569;"
+        badge_text = f"+{row['ev']}% EDGE" if row['ev'] >= 0 else f"{row['ev']}% HOLD"
+
         st.markdown(f"""
         <div class="wager-card">
             <div class="card-top">
@@ -475,7 +466,7 @@ if st.session_state.opps:
                     <span class="source-tag">PLAYNOW SK</span>
                     <span style="font-size: 11px; color: #64748b; margin-left: 8px; font-family: 'JetBrains Mono';">{row['time']} UTC</span>
                 </div>
-                <div class="edge-badge">+{row['ev']}% EDGE</div>
+                <div class="edge-badge" style="{badge_style}">{badge_text}</div>
             </div>
             <div class="match-label">{row['matchup']}</div>
             <div class="selection-label">{row['pick']}</div>
@@ -485,15 +476,15 @@ if st.session_state.opps:
                     <div class="terminal-data" style="color:#10b981;">{row['playnow_us']}</div>
                 </div>
                 <div>
-                    <div class="terminal-lbl">Sharp Fair</div>
+                    <div class="terminal-lbl">Market Fair</div>
                     <div class="terminal-data">{row['fair_us']}</div>
                 </div>
                 <div>
                     <div class="terminal-lbl">Win Prob</div>
-                    <div class="terminal-data">{row['fair_prob']}</div>
+                    <div class="terminal-data" style="color:#38bdf8;">{row['fair_prob']}</div>
                 </div>
                 <div>
-                    <div class="terminal-lbl">Kelly Bet</div>
+                    <div class="terminal-lbl">Suggested Bet</div>
                     <div class="terminal-data" style="color:#f59e0b;">${row['stake']}</div>
                 </div>
             </div>
@@ -504,7 +495,7 @@ if st.session_state.opps:
     st.markdown("---")
     st.markdown("### 📝 Quick-Log Wager to Google Sheet")
     with st.form("quick_log_form"):
-        play_labels = [f"{o['matchup']} ➔ {o['pick']} ({o['playnow_us']})" for o in st.session_state.opps]
+        play_labels = [f"{o['matchup']} ➔ {o['pick']} ({o['playnow_us']}) | Prob: {o['fair_prob']}" for o in st.session_state.opps]
         selected_idx = st.selectbox("Select Wager to Record", range(len(play_labels)), format_func=lambda x: play_labels[x])
         active = st.session_state.opps[selected_idx]
 
