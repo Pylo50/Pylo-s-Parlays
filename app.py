@@ -169,9 +169,6 @@ st.markdown("""
         color: #10b981;
         font-weight: 800;
     }
-    .highlight-hold {
-        color: #94a3b8;
-    }
 
     /* Intel / Facts Box */
     .intel-box {
@@ -208,7 +205,11 @@ STADIUM_COORDS = {
     "Seattle Mariners": (47.591, -122.332),
     "Detroit Lions": (42.340, -83.045),
     "New Orleans Saints": (29.951, -90.081),
-    "Kansas City Chiefs": (39.048, -94.483)
+    "Kansas City Chiefs": (39.048, -94.483),
+    "Arizona Cardinals": (33.527, -112.262),
+    "Los Angeles Chargers": (33.953, -118.338),
+    "Minnesota Vikings": (44.973, -93.257),
+    "Green Bay Packers": (44.501, -88.062)
 }
 
 def decimal_to_american(dec: float) -> str:
@@ -228,7 +229,6 @@ def fetch_weather(home_team: str):
         wind_kmh = cw.get("windspeed", 10)
         wind_dir = cw.get("winddirection", 0)
         
-        # Wind arrow interpretation
         dirs = ["N", "NE", "E", "SE", "S", "SW", "W", "NW"]
         wind_str = dirs[int((wind_dir + 22.5) % 360 / 45)]
         return f"{temp_c:.0f}°C | 💨 {wind_kmh:.0f} km/h {wind_str}"
@@ -317,13 +317,12 @@ if date_filter_mode == "Pick Specific Date (Calendar)":
 st.sidebar.markdown("---")
 st.sidebar.markdown("**Bankroll Settings**")
 bankroll = st.sidebar.number_input("Bankroll ($ CAD)", min_value=10.0, value=1000.0, step=50.0)
-min_win_prob = st.sidebar.slider("Highlight Bets with Prob ≥ %", min_value=40, max_value=80, value=50, step=5)
 
 run_scan = st.sidebar.button("⚡ Generate Complete Dossiers (~6 Credits)", type="primary")
 
 # --- MAIN DISPLAY ---
 st.markdown("<div class='terminal-title'>⚡ PYLOS PARLAYS <span class='accent-pill'>1-STOP COMMAND</span></div>", unsafe_allow_html=True)
-st.markdown("<div class='terminal-sub'>FULL MARKET MATRIX ➔ WEATHER ➔ TALE OF THE TAPE ➔ SHARP SASKATCHEWAN INTEL</div>", unsafe_allow_html=True)
+st.markdown("<div class='terminal-sub'>FULL MARKET MATRIX ➔ WEATHER ➔ SPORT-SPECIFIC INTEL ➔ PLAYNOW SK</div>", unsafe_allow_html=True)
 
 if "api_rem" not in st.session_state:
     st.session_state.api_rem = "---"
@@ -347,7 +346,7 @@ st.markdown(f"""
 if run_scan:
     st.session_state.dossiers = []
     try:
-        with st.spinner("Compiling full game dossier matrix, weather forecasts, and pitching intel..."):
+        with st.spinner("Compiling game dossiers, weather forecasts, and situational intelligence..."):
             raw_events, rem, used = fetch_mainlines(sport_key)
             st.session_state.api_rem = rem
             st.session_state.api_used = used
@@ -387,15 +386,13 @@ if run_scan:
                 matchup = f"{away_team} @ {home_team}"
                 formatted_time = dt.strftime("%b %d - %I:%M %p")
 
-                # Fetch Tale of the Tape & Weather
                 game_intel = intel_map.get(matchup, {
                     "away_rec": "---", "home_rec": "---",
-                    "away_pitcher": "Starting Pitcher", "home_pitcher": "Starting Pitcher",
+                    "away_pitcher": "TBD", "home_pitcher": "TBD",
                     "venue": f"{home_team} Stadium"
                 })
                 weather_info = fetch_weather(home_team)
 
-                # Devig consensus for all 3 markets
                 market_probs = {}
                 playnow_lines = {}
 
@@ -404,7 +401,7 @@ if run_scan:
                     is_sharp = any(k in bm_k for k in SHARP_KEYS)
 
                     for m in bm.get("markets", []):
-                        m_key = m.get("key") # h2h, spreads, totals
+                        m_key = m.get("key")
                         outcomes = m.get("outcomes", [])
                         if len(outcomes) >= 2:
                             raw_p = {o["name"] + str(o.get("point", "")): 1.0 / o["price"] for o in outcomes if o.get("price", 0) > 1.0}
@@ -446,12 +443,19 @@ if run_scan:
 
 # Render Full Game Dossiers
 if st.session_state.dossiers:
+    # Identify active sport family
+    is_mlb = "baseball" in sport_key
+    is_nfl = "americanfootball" in sport_key
+    is_nhl = "hockey" in sport_key
+    is_nba = "basketball" in sport_key
+
+    spread_label = "Run Line" if is_mlb else ("Puck Line" if is_nhl else "Point Spread")
+
     for g in st.session_state.dossiers:
         intel = g["intel"]
         p_lines = g["playnow"]
         s_probs = g["sharp_probs"]
 
-        # Helper to extract market data
         def get_line_data(m_key, side_name):
             for k, val in p_lines.items():
                 if k.startswith(m_key) and side_name in val["name"]:
@@ -476,38 +480,55 @@ if st.session_state.dossiers:
         over_tot = get_line_data("totals", "Over")
         under_tot = get_line_data("totals", "Under")
 
-        # Synthesize System Read
         top_play = "Neutral Board"
         top_prob = 0
         if home_ml["raw_prob"] > top_prob:
             top_prob = home_ml["raw_prob"]
-            top_play = f"Back **{g['home_team']} ML** (Win Prob: {home_ml['prob']})"
+            top_play = f"Back <b>{g['home_team']} ML</b> (Win Prob: {home_ml['prob']})"
         if away_ml["raw_prob"] > top_prob:
             top_prob = away_ml["raw_prob"]
-            top_play = f"Back **{g['away_team']} ML** (Win Prob: {away_ml['prob']})"
+            top_play = f"Back <b>{g['away_team']} ML</b> (Win Prob: {away_ml['prob']})"
 
-        # Strictly flush HTML block
+        # Dynamic Sport-Specific Metadata
+        if is_mlb:
+            tape_row_html = f"""<div class="tape-row">
+<div class="tape-col">⚾ <b>Away Starter:</b> {intel.get('away_pitcher', 'TBD')}</div>
+<div class="tape-col">⚾ <b>Home Starter:</b> {intel.get('home_pitcher', 'TBD')}</div>
+</div>"""
+            context_summary = f"Pitching duel features <b>{intel.get('away_pitcher', 'TBD')} vs. {intel.get('home_pitcher', 'TBD')}</b>. Stadium weather: <b>{g['weather']}</b>."
+        elif is_nfl:
+            tape_row_html = f"""<div class="tape-row">
+<div class="tape-col">🏈 <b>Away Team:</b> {g['away_team']}</div>
+<div class="tape-col">🏈 <b>Home Team:</b> {g['home_team']}</div>
+</div>"""
+            context_summary = f"NFL Game environment stands at <b>{g['weather']}</b>. Venue: <b>{intel.get('venue', 'Stadium')}</b>."
+        elif is_nhl:
+            tape_row_html = f"""<div class="tape-row">
+<div class="tape-col">🏒 <b>Away:</b> {g['away_team']}</div>
+<div class="tape-col">🏒 <b>Home:</b> {g['home_team']}</div>
+</div>"""
+            context_summary = f"NHL Matchup hosted at <b>{intel.get('venue', 'Arena')}</b>."
+        else:
+            tape_row_html = ""
+            context_summary = f"Venue: <b>{intel.get('venue', 'Arena')}</b>."
+
+        # Strictly flush HTML block (no leading spaces to prevent Markdown code box parsing)
         dossier_html = f"""<div class="game-dossier">
 <div class="dossier-header">
 <div>
 <div class="matchup-headline">{g['matchup']}</div>
-<div class="matchup-records">{g['away_team']} ({intel['away_rec']}) vs {g['home_team']} ({intel['home_rec']}) • 🏟️ {intel['venue']}</div>
+<div class="matchup-records">{g['away_team']} vs {g['home_team']} • 🏟️ {intel.get('venue', 'Stadium')}</div>
 </div>
 <div class="weather-badge">🌤️ {g['weather']}</div>
 </div>
-
-<div class="tape-row">
-<div class="tape-col">⚾ <b>Away Starter:</b> {intel['away_pitcher']}</div>
-<div class="tape-col">⚾ <b>Home Starter:</b> {intel['home_pitcher']}</div>
-</div>
-
+{tape_row_html}
 <table class="market-table">
 <thead>
 <tr>
-<th>Team / Market</th>
+<th>Team / Side</th>
 <th>Moneyline (PlayNow / Fair)</th>
-<th>Spread / Run Line</th>
-<th>Game Total (O/U)</th>
+<th>{spread_label}</th>
+<th>Total (O/U)</th>
 </tr>
 </thead>
 <tbody>
@@ -525,15 +546,14 @@ if st.session_state.dossiers:
 </tr>
 </tbody>
 </table>
-
 <div class="intel-box">
-💡 <b>System Intelligence & Game Read:</b> Scheduled for <b>{g['time']} SK</b>. Pitching duel features <b>{intel['away_pitcher']} vs. {intel['home_pitcher']}</b>. Weather conditions at first pitch stand at <b>{g['weather']}</b>. Strongest mathematical angle on the board: {top_play}.
+💡 <b>System Intelligence & Game Read:</b> Scheduled for <b>{g['time']} SK</b>. {context_summary} Strongest mathematical angle: {top_play}.
 </div>
 </div>"""
 
         st.markdown(dossier_html, unsafe_allow_html=True)
 
-    # 1-Tap Google Sheets Logger for any match
+    # 1-Tap Google Sheets Logger
     st.markdown("---")
     st.markdown("### 📝 Quick-Log Game Pick to Google Sheet")
     with st.form("dossier_logger"):
@@ -542,7 +562,7 @@ if st.session_state.dossiers:
         active_match = st.session_state.dossiers[chosen_match_idx]
 
         c1, c2, c3 = st.columns(3)
-        pick_selection = c1.text_input("Your Pick (e.g. Dodgers ML, Over 8.5)", value=f"{active_match['home_team']} ML")
+        pick_selection = c1.text_input("Your Pick (e.g. Lions -3.5, Over 48.5)", value=f"{active_match['home_team']} ML")
         wager_odds = c2.text_input("Odds Taken", value="-185")
         bet_amount = c3.number_input("Wager ($ CAD)", min_value=1.0, value=10.0, step=5.0)
 
@@ -560,7 +580,7 @@ if st.session_state.dossiers:
                     "Stake": bet_amount,
                     "EV_Percent": "Dossier Log",
                     "Status": "Open",
-                    "Notes": f"Weather: {active_match['weather']} | Pitchers: {active_match['intel']['away_pitcher']} vs {active_match['intel']['home_pitcher']}"
+                    "Notes": f"Weather: {active_match['weather']}"
                 }])
                 updated = pd.concat([sheet, new_row], ignore_index=True) if not sheet.empty else new_row
                 conn.update(worksheet="Sheet1", data=updated)
