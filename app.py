@@ -252,6 +252,13 @@ selected_sport_label = st.sidebar.selectbox("Sport Slate", list(SPORTS_PRESETS.k
 sport_info = SPORTS_PRESETS[selected_sport_label]
 sport_key = sport_info["key"]
 
+# Dedicated Calendar Date Filter
+target_date = st.sidebar.date_input(
+    "Game Date",
+    value=datetime.now(timezone.utc).date(),
+    help="Filter games scheduled on this specific calendar date"
+)
+
 scan_mode = st.sidebar.radio("Scan Mode", ["📊 All Games (Mainlines)", "🎯 Prop Sniper (Token Safe)"])
 
 target_event_id = None
@@ -271,11 +278,17 @@ else:
         events = get_upcoming_events(sport_key)
         if events:
             now_utc = datetime.now(timezone.utc)
-            # Filter out games that have already started from the dropdown
-            future_events = [e for e in events if datetime.fromisoformat(e['commence_time'].replace("Z", "+00:00")) > now_utc]
-            
-            if future_events:
-                ev_options = {f"{e['away_team']} @ {e['home_team']} ({e['commence_time'][11:16]} UTC)": e['id'] for e in future_events}
+            # Filter events matching the selected date that haven't started yet
+            filtered_events = []
+            for e in events:
+                commence_raw = e.get("commence_time", "")
+                if commence_raw:
+                    dt = datetime.fromisoformat(commence_raw.replace("Z", "+00:00"))
+                    if dt.date() == target_date and dt > now_utc:
+                        filtered_events.append(e)
+
+            if filtered_events:
+                ev_options = {f"{e['away_team']} @ {e['home_team']} ({e['commence_time'][11:16]} UTC)": e['id'] for e in filtered_events}
                 target_game_name = st.sidebar.selectbox("Select Upcoming Game", list(ev_options.keys()))
                 target_event_id = ev_options[target_game_name]
 
@@ -290,7 +303,7 @@ else:
                 queried_markets = ",".join(selected_props)
                 credit_cost = len(selected_props) * 2
             else:
-                st.sidebar.info("No upcoming games left today on the board.")
+                st.sidebar.info(f"No upcoming unstarted games found for {target_date}.")
         else:
             st.sidebar.info("No games listed.")
     except Exception as e:
@@ -300,14 +313,14 @@ st.sidebar.markdown("---")
 st.sidebar.markdown("**Math & Bankroll Filters**")
 bankroll = st.sidebar.number_input("Bankroll ($ CAD)", min_value=10.0, value=1000.0, step=50.0)
 
-# 40% Default Win Probability Slider
+# Default 40% Win Probability Slider
 min_win_prob = st.sidebar.slider(
     "Min Win Probability %", 
     min_value=15, 
     max_value=65, 
     value=40, 
     step=5,
-    help="Default 40% filters out deep longshots (like 14% underdogs) while capturing realistic live underdogs."
+    help="Default 40% filters out deep longshots while preserving live underdogs."
 )
 
 min_edge = st.sidebar.slider("Min Edge (+EV %)", 0.0, 10.0, 0.5, step=0.25)
@@ -341,10 +354,13 @@ st.markdown(f"""
 if run_scan:
     st.session_state.opps = []
     try:
-        with st.spinner("Crunching sharp consensus and purging in-game lines..."):
+        with st.spinner("Crunching sharp consensus and purging past/in-game lines..."):
             if scan_mode == "📊 All Games (Mainlines)":
                 raw_events, rem, used = fetch_mainlines(sport_key, queried_markets)
             else:
+                if not target_event_id:
+                    st.error("No valid game selected for this date.")
+                    st.stop()
                 raw_data, rem, used = fetch_game_props(sport_key, target_event_id, queried_markets)
                 raw_events = [raw_data]
 
@@ -354,12 +370,18 @@ if run_scan:
             found_plays = []
 
             for ev in raw_events:
-                # 1. Block games that have already started (eliminates stale in-game odds bugs)
+                # 1. Date and Pre-Game Filter
                 commence_raw = ev.get("commence_time", "")
                 if commence_raw:
                     commence_dt = datetime.fromisoformat(commence_raw.replace("Z", "+00:00"))
+                    
+                    # Filter by chosen calendar date
+                    if commence_dt.date() != target_date:
+                        continue
+                    
+                    # Block games that have already started
                     if commence_dt <= now_utc:
-                        continue  # Skip live or concluded games
+                        continue
 
                 matchup = f"{ev.get('away_team')} @ {ev.get('home_team')}"
                 bookmakers = ev.get("bookmakers", [])
@@ -411,14 +433,14 @@ if run_scan:
 
                     fair_p = pinnacle_fair[id_k]
                     
-                    # 2. Enforce Minimum Win Probability Cutoff (Default 40%)
+                    # Enforce Minimum Win Probability Cutoff (Default 40%)
                     if (fair_p * 100.0) < min_win_prob:
                         continue
 
                     dec_odds = wager["price"]
                     ev_pct = ((dec_odds * fair_p) - 1.0) * 100.0
 
-                    # 3. Enforce Edge Threshold
+                    # Enforce Edge Threshold
                     if ev_pct >= min_edge:
                         rec_stake = calculate_kelly(fair_p, dec_odds, fraction=kelly_fraction)
                         found_plays.append({
@@ -435,9 +457,9 @@ if run_scan:
 
             st.session_state.opps = found_plays
             if found_plays:
-                st.success(f"Discovered {len(found_plays)} high-probability +EV edges on PlayNow SK!")
+                st.success(f"Discovered {len(found_plays)} high-probability +EV edges on PlayNow SK for {target_date}!")
             else:
-                st.info(f"No plays met both the +EV threshold and the {min_win_prob}% win probability floor.")
+                st.info(f"No plays met both the +EV threshold and the {min_win_prob}% win probability floor for {target_date}.")
 
     except Exception as ex:
         st.error(f"Scan failed: {ex}")
