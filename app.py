@@ -190,6 +190,10 @@ st.markdown("""
         color: #f87171 !important;
         font-weight: 700;
     }
+    .color-unknown {
+        color: #94a3b8 !important;
+        font-weight: 700;
+    }
     .badge-verdict-good {
         background: rgba(16, 185, 129, 0.2);
         color: #10b981;
@@ -210,11 +214,33 @@ st.markdown("""
         font-size: 11px;
         display: inline-block;
     }
+    .badge-verdict-unpriced {
+        background: rgba(148, 163, 184, 0.15);
+        color: #94a3b8;
+        border: 1px solid #475569;
+        padding: 3px 8px;
+        border-radius: 6px;
+        font-weight: 800;
+        font-size: 11px;
+        display: inline-block;
+    }
     .hold-badge {
         font-size: 9.5px;
         color: #f59e0b;
         font-weight: 700;
         display: block;
+    }
+    .last-5-badge {
+        display: inline-block;
+        font-size: 10px;
+        font-family: 'JetBrains Mono', monospace;
+        font-weight: 700;
+        padding: 1px 6px;
+        border-radius: 4px;
+        background: rgba(30, 41, 59, 0.8);
+        border: 1px solid #334155;
+        color: #38bdf8;
+        margin-top: 3px;
     }
     .intel-box {
         background: rgba(15, 23, 42, 0.8);
@@ -279,6 +305,15 @@ LOCAL_TZ = ZoneInfo("America/Regina")
 GOOGLE_SHEET_URL = "https://docs.google.com/spreadsheets/d/12KN2zJqQUWxmbEznc-rBp-4gJuYwHMWvBJ6NnN2Pa-g/edit?usp=drivesdk"
 
 SHARP_BENCHMARKS = ["pinnacle", "betfair_ex_eu", "betonlineag", "bookmaker"]
+# Relative sharpness weighting used when averaging devigged sharp probabilities.
+# Pinnacle is widely regarded as the sharpest liquid book; weight it higher than
+# secondary sharp/offshore books when they disagree.
+SHARP_WEIGHTS = {
+    "pinnacle": 3.0,
+    "betfair_ex_eu": 2.0,
+    "bookmaker": 1.0,
+    "betonlineag": 1.0,
+}
 
 SPORT_PROPS_MAP = {
     "baseball_mlb": ["pitcher_strikeouts", "batter_home_runs", "batter_hits"],
@@ -398,6 +433,42 @@ def calculate_kelly(dec_odds: float, win_prob: float, bankroll: float, fraction:
     suggested_stake = round(bankroll * frac_k, 2)
     return round(frac_k * 100, 2), suggested_stake
 
+def weighted_sharp_average(prob_entries: list) -> float:
+    """
+    prob_entries: list of (book_key, devigged_prob) tuples.
+    Weights Pinnacle/Betfair Exchange higher than secondary sharp books
+    instead of a flat np.mean, since not all 'sharp' books are equally sharp.
+    """
+    if not prob_entries:
+        return None
+    total_w = 0.0
+    total_wp = 0.0
+    for book_key, prob in prob_entries:
+        w = 1.0
+        for k, ww in SHARP_WEIGHTS.items():
+            if k in book_key:
+                w = ww
+                break
+        total_w += w
+        total_wp += w * prob
+    return total_wp / total_w if total_w > 0 else None
+
+def compute_fair_and_edge(dec_price: float, prob_entries: list):
+    """
+    Central, honest edge calculator.
+    Returns (fair_p, edge_val, is_priced).
+    is_priced=False means NO sharp book has quoted this market — we genuinely
+    do not know the fair price, and the caller must NOT render this as a
+    negative-edge / 'pass' result. It must be rendered as 'Unpriced'.
+    """
+    if not prob_entries:
+        return None, None, False
+    fair_p = weighted_sharp_average(prob_entries)
+    if fair_p is None or fair_p <= 0:
+        return None, None, False
+    edge_val = ((dec_price * fair_p) - 1.0) * 100
+    return fair_p, edge_val, True
+
 # --- LOGGING HELPER ---
 def log_quick_bet(matchup: str, pick: str, odds: str, stake: float, notes: str):
     try:
@@ -454,6 +525,159 @@ def fetch_event_props(sport_key: str, event_id: str, prop_markets: tuple):
         return []
     except Exception:
         return []
+
+# --- HISTORICAL LAST 5 HIT TRACKER ENGINE (REAL GAME LOGS) ---
+_PROP_STAT_MAP = {
+    # market substring -> (mlb stat group, mlb stat field, espn stat key)
+    "strikeouts": ("pitching", "strikeOuts", "strikeouts"),
+    "batter_home_runs": ("hitting", "homeRuns", None),
+    "batter_hits": ("hitting", "hits", None),
+    "pass_yds": (None, None, "passingYards"),
+    "rush_yds": (None, None, "rushingYards"),
+    "reception_yds": (None, None, "receivingYards"),
+    "receptions": (None, None, "receptions"),
+    "anytime_td": (None, None, "totalTouchdowns"),
+    "player_points": (None, None, "points"),
+    "rebounds": (None, None, "rebounds"),
+    "assists": (None, None, "assists"),
+    "shots_on_goal": (None, None, "shotsOnGoal"),
+}
+
+def _resolve_prop_stat(prop_market: str):
+    key = prop_market.lower()
+    for frag, mapping in _PROP_STAT_MAP.items():
+        if frag in key:
+            return mapping
+    return (None, None, None)
+
+@st.cache_data(ttl=21600, show_spinner=False)
+def _mlb_player_id(player_name: str):
+    try:
+        url = "https://statsapi.mlb.com/api/v1/people/search"
+        r = requests.get(url, params={"names": player_name}, timeout=6).json()
+        people = r.get("people", [])
+        if people:
+            return people[0].get("id")
+    except Exception:
+        pass
+    return None
+
+@st.cache_data(ttl=21600, show_spinner=False)
+def _mlb_last5_gamelog(player_id: int, stat_group: str, season: int):
+    try:
+        url = f"https://statsapi.mlb.com/api/v1/people/{player_id}/stats"
+        params = {"stats": "gameLog", "group": stat_group, "season": season}
+        r = requests.get(url, params=params, timeout=8).json()
+        splits = r.get("stats", [{}])[0].get("splits", [])
+        return splits[-5:] if splits else []
+    except Exception:
+        return []
+
+@st.cache_data(ttl=21600, show_spinner=False)
+def _espn_athlete_id(player_name: str, sport_slug: str):
+    try:
+        url = f"https://site.api.espn.com/apis/site/v2/sports/{sport_slug}/athletes"
+        r = requests.get(url, params={"limit": 2000}, timeout=8).json()
+        for a in r.get("athletes", []):
+            if a.get("displayName", "").lower() == player_name.lower():
+                return a.get("id")
+        # fallback: loose contains match
+        for a in r.get("athletes", []):
+            if player_name.lower() in a.get("displayName", "").lower():
+                return a.get("id")
+    except Exception:
+        pass
+    return None
+
+@st.cache_data(ttl=21600, show_spinner=False)
+def _espn_last5_gamelog(athlete_id: str, sport_slug: str):
+    try:
+        url = f"https://site.web.api.espn.com/apis/common/v3/sports/{sport_slug}/athletes/{athlete_id}/gamelog"
+        r = requests.get(url, timeout=8).json()
+        events = r.get("events", {})
+        # ESPN gamelog structure varies; pull the most recent up-to-5 entries generically.
+        game_stats = []
+        for season_block in r.get("seasonTypes", []):
+            for cat in season_block.get("categories", []):
+                for ev in cat.get("events", []):
+                    game_stats.append(ev)
+        return game_stats[-5:] if game_stats else []
+    except Exception:
+        return []
+
+def fetch_player_last_5(player_name: str, prop_market: str, line_point: float, sport: str = "americanfootball_nfl"):
+    """
+    Returns REAL last-5-game hit-rate for the given player/prop line, computed
+    from live game logs. If the player or stat cannot be verified, this
+    returns an explicit 'No verified data' string rather than a guessed number.
+    Never fabricates a hit rate.
+    """
+    if not player_name or line_point is None:
+        return "Last 5: No verified data"
+
+    stat_group, mlb_field, espn_field = _resolve_prop_stat(prop_market)
+
+    try:
+        if "baseball" in sport and mlb_field:
+            pid = _mlb_player_id(player_name)
+            if not pid:
+                return "Last 5: No verified data"
+            season = datetime.now().year
+            games = _mlb_last5_gamelog(pid, stat_group, season)
+            if not games:
+                # try previous season if current season has no logged games yet
+                games = _mlb_last5_gamelog(pid, stat_group, season - 1)
+            if not games:
+                return "Last 5: No verified data"
+            hits = 0
+            for g in games:
+                stat_val = g.get("stat", {}).get(mlb_field, None)
+                if stat_val is not None and float(stat_val) > float(line_point):
+                    hits += 1
+            return f"Last 5: {hits}/{len(games)} Over"
+
+        elif espn_field:
+            slug_map = {
+                "americanfootball_nfl": "football/nfl",
+                "basketball_nba": "basketball/nba",
+                "icehockey_nhl": "hockey/nhl",
+            }
+            sport_slug = slug_map.get(sport)
+            if not sport_slug:
+                return "Last 5: No verified data"
+            aid = _espn_athlete_id(player_name, sport_slug)
+            if not aid:
+                return "Last 5: No verified data"
+            games = _espn_last5_gamelog(aid, sport_slug)
+            if not games:
+                return "Last 5: No verified data"
+            hits = 0
+            counted = 0
+            for g in games:
+                stats = g.get("stats", [])
+                # ESPN returns stats as a list aligned to labeled categories;
+                # without a reliable label map we can't safely extract a single
+                # field, so we conservatively only count games we can parse.
+                val = None
+                labels = g.get("labels", [])
+                if espn_field in labels:
+                    idx = labels.index(espn_field)
+                    if idx < len(stats):
+                        try:
+                            val = float(stats[idx])
+                        except (TypeError, ValueError):
+                            val = None
+                if val is not None:
+                    counted += 1
+                    if val > float(line_point):
+                        hits += 1
+            if counted == 0:
+                return "Last 5: No verified data"
+            return f"Last 5: {hits}/{counted} Over"
+
+        return "Last 5: No verified data"
+    except Exception:
+        return "Last 5: No verified data"
 
 # --- SCOUTING INTEL & WEATHER ENGINES ---
 @st.cache_data(ttl=7200, show_spinner=False)
@@ -611,11 +835,9 @@ sport_key = sport_map[selected_sport_label]
 market_scope = st.sidebar.radio(
     "Market Scope",
     ["Team Markets Only", "Player and Team Props"],
-    help="Team: Mainlines only. Player & Team: Adds yardage, strikeout, hits, and scoring player props.",
+    help="Team: Mainlines only. Player & Team: Adds sport-specific yardage, strikeouts, and scoring props.",
     key="market_scope_radio"
 )
-
-only_pos_ev = st.sidebar.checkbox("🎯 Highlight +EV Value Plays", value=False, help="Adds a green glow and clear border to games that have a positive mathematical edge.")
 
 now_local = datetime.now(LOCAL_TZ)
 tomorrow_local = (now_local + timedelta(days=1)).date()
@@ -777,7 +999,7 @@ if run_scan or (recalc_only and st.session_state.raw_events):
                                 if is_sharp and idx < len(devigged):
                                     if ident not in market_probs:
                                         market_probs[ident] = []
-                                    market_probs[ident].append(devigged[idx])
+                                    market_probs[ident].append((bm_k, devigged[idx]))
 
                                 is_playnow = "playnow" in bm_k
                                 is_prop_book = not is_sharp and m_key not in ["h2h", "spreads", "totals"]
@@ -825,7 +1047,7 @@ if run_scan or (recalc_only and st.session_state.raw_events):
 
             st.session_state.dossiers = compiled
             if compiled:
-                st.success(f"Loaded {len(compiled)} Matchups with Holds & Prop Categories!")
+                st.success(f"Loaded {len(compiled)} Matchups with Full Visual Fidelity!")
             else:
                 st.info("No active games matched your selected schedule.")
     except Exception as ex:
@@ -851,7 +1073,7 @@ with tab_dossiers:
             def get_best_line(m_key, side_name):
                 matching = [val for k, val in p_lines.items() if k.startswith(m_key) and side_name in val["name"]]
                 if not matching:
-                    return {"odds": "---", "prob": "---", "edge": "---", "point": "", "raw_prob": 0, "kelly": "---", "dec": 0, "edge_raw": -99.0, "k_stake": 0, "color_cls": "color-bad", "vel_html": ""}
+                    return {"odds": "---", "prob": "---", "edge": "N/A", "point": "", "raw_prob": 0, "kelly": "---", "dec": 0, "edge_raw": None, "k_stake": 0, "color_cls": "color-unknown", "vel_html": ""}
 
                 if is_mlb and m_key == "spreads":
                     standard = [m for m in matching if m["point"] is not None and abs(abs(m["point"]) - 1.5) < 0.01]
@@ -863,21 +1085,32 @@ with tab_dossiers:
 
                 dec = best_item["price"]
                 k_ident = best_item["ident"]
-                prob_list = s_probs.get(k_ident, [])
+                prob_entries = s_probs.get(k_ident, [])
 
-                if prob_list:
-                    fair_p = float(np.mean(prob_list))
-                    edge_val = ((dec * fair_p) - 1.0) * 100
-                    color_cls = "color-good" if edge_val > 0.5 else "color-bad"
-                else:
-                    fair_p = 1.0 / dec
-                    edge_val = -4.5
-                    color_cls = "color-bad"
+                fair_p, edge_val, is_priced = compute_fair_and_edge(dec, prob_entries)
 
                 pt_str = f" ({best_item['point']:+})" if best_item['point'] is not None else ""
                 vel = best_item.get("velocity", "◼ STABLE")
                 badge_class = "steam-badge-up" if "STEAM" in vel else ("steam-badge-down" if "DRIFT" in vel else "steam-badge-flat")
 
+                if not is_priced:
+                    # No sharp book has this market quoted. This is NOT a -EV result,
+                    # it is genuinely unknown, and must be labeled as such.
+                    return {
+                        "odds": decimal_to_american(dec),
+                        "prob": "N/A",
+                        "edge": "Unpriced",
+                        "point": pt_str,
+                        "raw_prob": 0,
+                        "kelly": f"${flat_unit:.2f} (Flat - Unpriced)",
+                        "dec": dec,
+                        "edge_raw": None,
+                        "color_cls": "color-unknown",
+                        "k_stake": flat_unit,
+                        "vel_html": f"<span class='{badge_class}'>{vel}</span>"
+                    }
+
+                color_cls = "color-good" if edge_val > 0.5 else "color-bad"
                 k_pct, k_stake = calculate_kelly(dec, fair_p, bankroll, kelly_fraction)
                 kelly_str = f"${k_stake:.2f}" if k_stake > 0 else f"${flat_unit:.2f} (Flat)"
 
@@ -902,11 +1135,12 @@ with tab_dossiers:
             over_tot = get_best_line("totals", "Over")
             under_tot = get_best_line("totals", "Under")
 
-            all_edges = [away_ml["edge_raw"], home_ml["edge_raw"], away_spread["edge_raw"], home_spread["edge_raw"], over_tot["edge_raw"], under_tot["edge_raw"]]
-            has_pos_ev = any(e > 0.5 for e in all_edges if e > -90)
+            all_lines = [away_ml, home_ml, away_spread, home_spread, over_tot, under_tot]
+            priced_edges = [l["edge_raw"] for l in all_lines if l["edge_raw"] is not None]
+            has_pos_ev = any(e > 0.5 for e in priced_edges)
 
-            # Fix: Never dim or darken cards. All cards stay 100% visible and bright.
-            if only_pos_ev and has_pos_ev:
+            # Highlighting: Crisp 100% brightness always, with a distinct glowing border for positive edge
+            if has_pos_ev:
                 card_border = "2px solid #10b981"
                 card_glow = "box-shadow: 0 0 20px rgba(16, 185, 129, 0.4);"
             else:
@@ -918,8 +1152,8 @@ with tab_dossiers:
             spread_hold = calculate_market_hold([away_spread["dec"], home_spread["dec"]])
             total_hold = calculate_market_hold([over_tot["dec"], under_tot["dec"]])
 
-            best_edge = max(all_edges)
-            if best_edge >= 1.0:
+            best_edge = max(priced_edges) if priced_edges else None
+            if best_edge is not None and best_edge >= 1.0:
                 verdict_badge = "<span class='badge-verdict-good'>🎯 ACTIONABLE +EV VALUE PLAY</span>"
                 if home_ml["edge_raw"] == best_edge:
                     top_play = f"Back <b class='color-good'>{g['home_team']} ML</b> (Edge: {home_ml['edge']} | Win Prob: {home_ml['prob']})"
@@ -931,6 +1165,9 @@ with tab_dossiers:
                     top_play = f"Back <b class='color-good'>Under {under_tot['point']}</b> (Edge: {under_tot['edge']} | Win Prob: {under_tot['prob']})"
                 else:
                     top_play = f"Back Spread angle with edge: {best_edge:+.1f}%"
+            elif not priced_edges:
+                verdict_badge = "<span class='badge-verdict-unpriced'>❓ UNPRICED / NO SHARP CONSENSUS</span>"
+                top_play = "No sharp benchmark book has quoted this market yet. Fair value cannot be verified — treat any PlayNow price here as unknown risk, not a pass."
             else:
                 verdict_badge = "<span class='badge-verdict-pass'>🚫 PASS / NO MATHEMATICAL EDGE</span>"
                 top_play = f"Market is fully juiced (Book holds: {ml_hold}% ML, {spread_hold}% Spread). No mathematical mispricing detected against sharp consensus."
@@ -969,8 +1206,8 @@ with tab_dossiers:
                 tape_row_html = ""
                 context_summary = f"Venue: <b>{intel.get('venue', 'Arena')}</b>."
 
-            # Dossier wrapper with 100% full brightness and crisp readability
-            dossier_html = f"""<div class="game-dossier" style="background: linear-gradient(145deg, rgba(15, 23, 42, 0.95) 0%, rgba(11, 15, 25, 0.98) 100%); border: {card_border}; opacity: 1.0; {card_glow}">
+            # Dossier card with 100% full brightness and crisp contrast
+            dossier_html = f"""<div class="game-dossier" style="background: linear-gradient(145deg, rgba(15, 23, 42, 0.95) 0%, rgba(11, 15, 25, 0.98) 100%); border: {card_border}; {card_glow}">
 <div class="dossier-header">
 <div>
 <div class="matchup-headline">{g['matchup']} &nbsp;{verdict_badge}</div>
@@ -1010,7 +1247,7 @@ with tab_dossiers:
             # Render dossier container
             st.markdown(dossier_html, unsafe_allow_html=True)
 
-            # Sport-Specific Categorized Props
+            # Sport-Specific Categorized Props with Hit Tracker
             if market_scope == "Player and Team Props":
                 if g["props"]:
                     st.markdown("<div style='font-size: 13px; font-weight: 800; color: #38bdf8; margin: 8px 0 6px 0;'>🎯 Categorized Player Prop Intelligence</div>", unsafe_allow_html=True)
@@ -1030,42 +1267,65 @@ with tab_dossiers:
                                 for p in c_props_list:
                                     p_dec = p["price"]
                                     p_ident = p["ident"]
-                                    p_probs = s_probs.get(p_ident, [])
-                                    if p_probs:
-                                        p_fair = float(np.mean(p_probs))
-                                        p_edge = ((p_dec * p_fair) - 1.0) * 100
-                                    else:
-                                        p_fair = 1.0 / p_dec
-                                        p_edge = -4.5
+                                    p_prob_entries = s_probs.get(p_ident, [])
+                                    p_fair, p_edge, p_is_priced = compute_fair_and_edge(p_dec, p_prob_entries)
+
+                                    # Pull REAL historical Last 5 performance trend
+                                    last_5_metric = fetch_player_last_5(p["description"], p["market"], p.get("point"), sport_key)
+
+                                    if not p_is_priced:
+                                        evaluated_props.append({
+                                            **p,
+                                            "fair": 0,
+                                            "edge": None,
+                                            "stake": flat_unit,
+                                            "last_5": last_5_metric,
+                                            "color_cls": "color-unknown",
+                                            "edge_label": "Unpriced",
+                                            "fair_label": "N/A"
+                                        })
+                                        continue
+
                                     k_pct, k_stake = calculate_kelly(p_dec, p_fair, bankroll, kelly_fraction)
                                     evaluated_props.append({
                                         **p,
                                         "fair": p_fair,
                                         "edge": p_edge,
                                         "stake": k_stake if k_stake > 0 else flat_unit,
-                                        "color_cls": "color-good" if p_edge > 0.5 else "color-bad"
+                                        "last_5": last_5_metric,
+                                        "color_cls": "color-good" if p_edge > 0.5 else "color-bad",
+                                        "edge_label": f"{p_edge:+.1f}%",
+                                        "fair_label": f"{p_fair*100:.1f}%"
                                     })
 
-                                evaluated_props.sort(key=lambda x: x["edge"], reverse=True)
-                                top_p = evaluated_props[0]
+                                # Sort priced props by edge (desc); push unpriced to the bottom.
+                                evaluated_props.sort(key=lambda x: (x["edge"] is None, -(x["edge"] or 0)))
+                                top_priced = [p for p in evaluated_props if p["edge"] is not None]
 
-                                top_edge_badge = f"+{top_p['edge']:.1f}%" if top_p['edge'] >= 0 else f"{top_p['edge']:.1f}%"
-                                st.markdown(f"""
-                                <div class="top-pick-banner">
-                                    ⭐ <b>Top Value in {c_name}:</b> {top_p['description']} <b>{top_p['name']} {top_p.get('point', '')}</b> ({decimal_to_american(top_p['price'])}) 
-                                    • Sharp Win Prob: <b>{top_p['fair']*100:.1f}%</b> • True Edge: <b class="{top_p['color_cls']}">{top_edge_badge}</b>
-                                </div>
-                                """, unsafe_allow_html=True)
+                                if top_priced:
+                                    top_p = top_priced[0]
+                                    st.markdown(f"""
+                                    <div class="top-pick-banner">
+                                        ⭐ <b>Top Value in {c_name}:</b> {top_p['description']} <b>{top_p['name']} {top_p.get('point', '')}</b> ({decimal_to_american(top_p['price'])}) 
+                                        • <span class="last-5-badge">{top_p['last_5']}</span> • Sharp Win Prob: <b>{top_p['fair_label']}</b> • True Edge: <b class="{top_p['color_cls']}">{top_p['edge_label']}</b>
+                                    </div>
+                                    """, unsafe_allow_html=True)
+                                else:
+                                    st.markdown("""
+                                    <div class="top-pick-banner" style="border-color:#475569;">
+                                        ❓ No props in this category have sharp-book coverage yet — value cannot be verified.
+                                    </div>
+                                    """, unsafe_allow_html=True)
 
                                 p_table_rows = ""
-                                for p in evaluated_props[:6]:
+                                for p in evaluated_props[:8]:
                                     pt_lbl = f"{p['point']}" if p['point'] is not None else ""
                                     p_table_rows += f"""<tr>
-                                    <td style="text-align:left;"><b>{p['description']}</b></td>
+                                    <td style="text-align:left;"><b>{p['description']}</b><br><span class="last-5-badge">{p['last_5']}</span></td>
                                     <td>{p['name']} {pt_lbl}</td>
                                     <td><span class="{p['color_cls']}">{decimal_to_american(p['price'])}</span></td>
-                                    <td>{p['fair']*100:.1f}%</td>
-                                    <td><span class="{p['color_cls']}">{p['edge']:+.1f}%</span></td>
+                                    <td>{p['fair_label']}</td>
+                                    <td><span class="{p['color_cls']}">{p['edge_label']}</span></td>
                                     <td><span class="highlight-kelly">${p['stake']:.2f}</span></td>
                                     </tr>"""
 
@@ -1073,7 +1333,7 @@ with tab_dossiers:
                                 <table class="market-table">
                                 <thead>
                                 <tr>
-                                <th>Player</th>
+                                <th>Player / Last 5</th>
                                 <th>Selection</th>
                                 <th>Odds</th>
                                 <th>Fair %</th>
@@ -1085,7 +1345,7 @@ with tab_dossiers:
                                 </table>
                                 """, unsafe_allow_html=True)
                     else:
-                        st.caption("No sub-category matches for active props.")
+                        st.caption("No active props found for this category.")
                 else:
                     st.markdown("""<div style="background: rgba(15, 23, 42, 0.5); border: 1px dashed #334155; border-radius: 6px; padding: 8px 12px; margin: 8px 0; font-size: 11.5px; color: #94a3b8;">
                     🎯 <b>Player Props:</b> Awaiting oddsmaker posting for this slate.
@@ -1135,33 +1395,42 @@ with tab_parlays:
             # Mainlines
             for k, val in g["playnow"].items():
                 if 1.05 < val["price"] < 3.50:
-                    prob_list = g["sharp_probs"].get(k, [])
-                    fair_p = float(np.mean(prob_list)) if prob_list else (1.0 / val["price"])
-                    edge_calc = ((val["price"] * fair_p) - 1.0) * 100
-                    if fair_p >= 0.45 or val["price"] <= 1.45:
+                    prob_entries = g["sharp_probs"].get(k, [])
+                    fair_p, edge_calc, is_priced = compute_fair_and_edge(val["price"], prob_entries)
+                    if not is_priced:
+                        # Unpriced legs are still eligible for parlays (implied prob is
+                        # the best available estimate), but tagged as unverified.
+                        fair_p = 1.0 / val["price"]
+                        leg_tag = "Unverified Leg"
+                    elif fair_p >= 0.45 or val["price"] <= 1.45:
                         leg_tag = "Floor Leg" if val["price"] <= 1.45 else "Standard Leg"
-                        candidate_legs.append({
-                            "game_id": g["id"],
-                            "matchup": g["matchup"],
-                            "pick": f"[{leg_tag}] {g['matchup']} ➔ {val['name']} ({decimal_to_american(val['price'])})",
-                            "dec": val["price"],
-                            "prob": fair_p,
-                            "edge": edge_calc
-                        })
+                    else:
+                        continue
+                    candidate_legs.append({
+                        "game_id": g["id"],
+                        "matchup": g["matchup"],
+                        "pick": f"[{leg_tag}] {g['matchup']} ➔ {val['name']} ({decimal_to_american(val['price'])})",
+                        "dec": val["price"],
+                        "prob": fair_p,
+                        "edge": edge_calc if is_priced else None
+                    })
             # Player Props
             for p in g.get("props", []):
                 if 1.25 < p["price"] < 3.00:
-                    prob_list = g["sharp_probs"].get(p["ident"], [])
-                    fair_p = float(np.mean(prob_list)) if prob_list else (1.0 / p["price"])
-                    edge_calc = ((p["price"] * fair_p) - 1.0) * 100
-                    leg_tag = "Floor Prop" if p["price"] <= 1.50 else "Value Prop"
+                    prob_entries = g["sharp_probs"].get(p["ident"], [])
+                    fair_p, edge_calc, is_priced = compute_fair_and_edge(p["price"], prob_entries)
+                    if not is_priced:
+                        fair_p = 1.0 / p["price"]
+                        leg_tag = "Unverified Prop"
+                    else:
+                        leg_tag = "Floor Prop" if p["price"] <= 1.50 else "Value Prop"
                     candidate_legs.append({
                         "game_id": g["id"],
                         "matchup": g["matchup"],
                         "pick": f"[{leg_tag}] {p['description']} ➔ {p['name']} {p.get('point', '')} ({decimal_to_american(p['price'])})",
                         "dec": p["price"],
                         "prob": fair_p,
-                        "edge": edge_calc
+                        "edge": edge_calc if is_priced else None
                     })
 
     if len(candidate_legs) >= 2:
@@ -1174,7 +1443,7 @@ with tab_parlays:
             is_correlated = len(game_ids) != len(set(game_ids))
 
             if is_correlated:
-                st.warning("⚠️ Same-Game Correlation Warning: Multiple legs from the same game detected. PlayNow applies dynamic SGP covariance.")
+                st.warning("⚠️ Same-Game Correlation Warning: Multiple legs from the same game detected. PlayNow applies custom SGP covariance.")
 
             total_dec = 1.0
             joint_prob = 1.0
@@ -1188,6 +1457,9 @@ with tab_parlays:
             p_final_stake = parlay_kelly if parlay_kelly > 0 else flat_unit
             parlay_color = "#10b981" if parlay_edge >= 0 else "#f87171"
 
+            any_unverified = any(c["edge"] is None for c in chosen)
+            unverified_note = " ⚠️ Includes unverified (unpriced) legs — treat this parlay's edge as an estimate, not a confirmed number." if any_unverified else ""
+
             st.markdown(f"""<div class="game-dossier" style="background: rgba(15, 23, 42, 0.95); border: 2px solid {parlay_color};">
 <div class="matchup-headline">Combined Multi-Leg Ticket ({parlay_us})</div>
 <div style="font-size: 12px; color: #94a3b8; margin-bottom: 10px;">{' + '.join([c['pick'] for c in chosen])}</div>
@@ -1195,7 +1467,7 @@ with tab_parlays:
 <div class="scout-card">
     <div class="scout-title">Combined Odds & Edge</div>
     <div style="font-size: 15px; font-weight: 800; color: #ffffff;">{parlay_us} ({total_dec:.2f} Dec)</div>
-    <div style="font-size: 11px; font-family: 'JetBrains Mono', monospace; color: {parlay_color}; margin-top: 2px;">Edge: {parlay_edge:+.1f}% • Compound Win Prob: {round(joint_prob * 100, 1)}%</div>
+    <div style="font-size: 11px; font-family: 'JetBrains Mono', monospace; color: {parlay_color}; margin-top: 2px;">Edge: {parlay_edge:+.1f}% • Compound Win Prob: {round(joint_prob * 100, 1)}%{unverified_note}</div>
 </div>
 <div class="scout-card">
     <div class="scout-title">Suggested Wager ({'Kelly' if parlay_kelly > 0 else 'Option B Flat'})</div>
