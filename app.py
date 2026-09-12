@@ -184,13 +184,33 @@ st.markdown("""
         font-size: 12px;
         text-align: center;
     }
-    .highlight-edge {
-        color: #10b981;
+    .color-good {
+        color: #10b981 !important;
         font-weight: 800;
     }
-    .highlight-kelly {
-        color: #38bdf8;
+    .color-bad {
+        color: #f87171 !important;
         font-weight: 700;
+    }
+    .badge-verdict-good {
+        background: rgba(16, 185, 129, 0.2);
+        color: #10b981;
+        border: 1px solid #10b981;
+        padding: 3px 8px;
+        border-radius: 6px;
+        font-weight: 800;
+        font-size: 11px;
+        display: inline-block;
+    }
+    .badge-verdict-pass {
+        background: rgba(239, 68, 68, 0.15);
+        color: #f87171;
+        border: 1px solid #ef4444;
+        padding: 3px 8px;
+        border-radius: 6px;
+        font-weight: 800;
+        font-size: 11px;
+        display: inline-block;
     }
     .hold-badge {
         font-size: 9.5px;
@@ -200,7 +220,7 @@ st.markdown("""
     }
     .intel-box {
         background: rgba(15, 23, 42, 0.8);
-        border-left: 3px solid #10b981;
+        border-left: 3px solid #38bdf8;
         border-radius: 6px;
         padding: 8px 12px;
         font-size: 11.5px;
@@ -564,6 +584,8 @@ market_scope = st.sidebar.radio(
     key="market_scope_radio"
 )
 
+only_pos_ev = st.sidebar.checkbox("🎯 Highlight Only +EV Actionable Games", value=False, help="Hides games where every side has negative edge")
+
 now_local = datetime.now(LOCAL_TZ)
 tomorrow_local = (now_local + timedelta(days=1)).date()
 day_after_local = (now_local + timedelta(days=2)).date()
@@ -596,7 +618,7 @@ recalc_only = col_b2.button("🔄 Re-Analyze", key="recalc_btn")
 
 # --- STATS SUMMARY BAR ---
 st.markdown("<div class='terminal-title'>⚡ PYLOS PARLAYS <span class='accent-pill'>SHARP COMMAND</span></div>", unsafe_allow_html=True)
-st.markdown("<div class='terminal-sub'>POWER DEVIGGED ➔ EDGE & HOLD INTEL ➔ 1-CLICK LOGGING ➔ SASKATCHEWAN TERMINAL</div>", unsafe_allow_html=True)
+st.markdown("<div class='terminal-sub'>COLOR-CODED SHARP VALUE ➔ GREEN: +EV | RED: -EV ➔ SASKATCHEWAN TERMINAL</div>", unsafe_allow_html=True)
 
 st.markdown(f"""
 <div class='metric-grid'>
@@ -632,7 +654,7 @@ if run_scan:
 
 if run_scan or (recalc_only and st.session_state.raw_events):
     try:
-        with st.spinner("Devigging odds, requesting event props, and compiling scouting intel..."):
+        with st.spinner("Devigging odds, evaluating edge vs hold, and color-coding slate..."):
             target_date_str = now_local.strftime("%Y-%m-%d")
             if "Tomorrow" in date_filter_mode and "Day After" not in date_filter_mode:
                 target_date_str = tomorrow_local.strftime("%Y-%m-%d")
@@ -726,7 +748,6 @@ if run_scan or (recalc_only and st.session_state.raw_events):
                                         market_probs[ident] = []
                                     market_probs[ident].append(devigged[idx])
 
-                                # Accept lines from PlayNow or general consensus for props
                                 is_playnow = "playnow" in bm_k
                                 is_prop_book = not is_sharp and m_key not in ["h2h", "spreads", "totals"]
 
@@ -755,7 +776,6 @@ if run_scan or (recalc_only and st.session_state.raw_events):
                                         if is_playnow:
                                             playnow_lines[ident] = line_dict
                                     else:
-                                        # Deduplicate props by player and market line
                                         if not any(p["ident"] == ident for p in props_data):
                                             props_data.append(line_dict)
 
@@ -774,7 +794,7 @@ if run_scan or (recalc_only and st.session_state.raw_events):
 
             st.session_state.dossiers = compiled
             if compiled:
-                st.success(f"Loaded {len(compiled)} Matchups with Holds & Scouting Intel!")
+                st.success(f"Loaded {len(compiled)} Matchups with Full +EV / -EV Color Coding!")
             else:
                 st.info("No active games matched your selected schedule.")
     except Exception as ex:
@@ -791,6 +811,7 @@ with tab_dossiers:
         is_nhl = "hockey" in sport_key
         spread_label = "Run Line" if is_mlb else ("Puck Line" if is_nhl else "Point Spread")
 
+        rendered_count = 0
         for idx_g, g in enumerate(st.session_state.dossiers):
             intel = g["intel"]
             p_lines = g["playnow"]
@@ -799,7 +820,7 @@ with tab_dossiers:
             def get_best_line(m_key, side_name):
                 matching = [val for k, val in p_lines.items() if k.startswith(m_key) and side_name in val["name"]]
                 if not matching:
-                    return {"odds": "---", "prob": "---", "edge": "---", "point": "", "raw_prob": 0, "kelly": "---", "dec": 0, "edge_raw": 0, "k_stake": 0, "vel_html": ""}
+                    return {"odds": "---", "prob": "---", "edge": "---", "point": "", "raw_prob": 0, "kelly": "---", "dec": 0, "edge_raw": -99.0, "k_stake": 0, "color_cls": "color-bad", "vel_html": ""}
 
                 if is_mlb and m_key == "spreads":
                     standard = [m for m in matching if m["point"] is not None and abs(abs(m["point"]) - 1.5) < 0.01]
@@ -820,6 +841,7 @@ with tab_dossiers:
 
                 k_pct, k_stake = calculate_kelly(dec, fair_p, bankroll, kelly_fraction)
                 kelly_str = f"${k_stake:.2f}" if k_stake > 0 else f"${flat_unit:.2f} (Flat)"
+                color_cls = "color-good" if edge_val >= 0 else "color-bad"
 
                 return {
                     "odds": decimal_to_american(dec),
@@ -830,6 +852,7 @@ with tab_dossiers:
                     "kelly": kelly_str,
                     "dec": dec,
                     "edge_raw": edge_val,
+                    "color_cls": color_cls,
                     "k_stake": k_stake if k_stake > 0 else flat_unit,
                     "vel_html": f"<span class='{badge_class}'>{vel}</span>"
                 }
@@ -841,20 +864,36 @@ with tab_dossiers:
             over_tot = get_best_line("totals", "Over")
             under_tot = get_best_line("totals", "Under")
 
+            # Check if any mainline has positive edge
+            all_edges = [away_ml["edge_raw"], home_ml["edge_raw"], away_spread["edge_raw"], home_spread["edge_raw"], over_tot["edge_raw"], under_tot["edge_raw"]]
+            has_pos_ev = any(e >= 0.0 for e in all_edges if e > -90)
+
+            if only_pos_ev and not has_pos_ev:
+                continue
+
+            rendered_count += 1
             ml_hold = calculate_market_hold([away_ml["dec"], home_ml["dec"]])
             spread_hold = calculate_market_hold([away_spread["dec"], home_spread["dec"]])
             total_hold = calculate_market_hold([over_tot["dec"], under_tot["dec"]])
 
-            top_play = "No Value Identified"
-            top_prob = 0
-            if home_ml["raw_prob"] > top_prob:
-                top_prob = home_ml["raw_prob"]
-                top_play = f"Back <b>{g['home_team']} ML</b> (Sharp Prob: {home_ml['prob']} | Edge: {home_ml['edge']})"
-            if away_ml["raw_prob"] > top_prob:
-                top_prob = away_ml["raw_prob"]
-                top_play = f"Back <b>{g['away_team']} ML</b> (Sharp Prob: {away_ml['prob']} | Edge: {away_ml['edge']})"
+            # Formulate sharp recommendation and verdict
+            best_edge = max(all_edges)
+            if best_edge >= 1.5:
+                verdict_badge = "<span class='badge-verdict-good'>🎯 ACTIONABLE +EV VALUE PLAY</span>"
+                if home_ml["edge_raw"] == best_edge:
+                    top_play = f"Back <b class='color-good'>{g['home_team']} ML</b> (Edge: {home_ml['edge']} | Win Prob: {home_ml['prob']})"
+                elif away_ml["edge_raw"] == best_edge:
+                    top_play = f"Back <b class='color-good'>{g['away_team']} ML</b> (Edge: {away_ml['edge']} | Win Prob: {away_ml['prob']})"
+                elif over_tot["edge_raw"] == best_edge:
+                    top_play = f"Back <b class='color-good'>Over {over_tot['point']}</b> (Edge: {over_tot['edge']} | Win Prob: {over_tot['prob']})"
+                elif under_tot["edge_raw"] == best_edge:
+                    top_play = f"Back <b class='color-good'>Under {under_tot['point']}</b> (Edge: {under_tot['edge']} | Win Prob: {under_tot['prob']})"
+                else:
+                    top_play = f"Back Spread angle with edge: {best_edge:+.1f}%"
+            else:
+                verdict_badge = "<span class='badge-verdict-pass'>🚫 PASS / NO MATHEMATICAL EDGE</span>"
+                top_play = f"Market is fully juiced (Book holds: {ml_hold}% ML, {spread_hold}% Spread). No mathematical mispricing detected against sharp consensus."
 
-            # Mobile-optimized 2-line stat cards
             if is_mlb:
                 tape_row_html = f"""<div class="tape-row">
 <div class="scout-card">
@@ -889,10 +928,11 @@ with tab_dossiers:
                 tape_row_html = ""
                 context_summary = f"Venue: <b>{intel.get('venue', 'Arena')}</b>."
 
+            # Table with Green/Red conditional styling on every odd and edge
             dossier_html = f"""<div class="game-dossier">
 <div class="dossier-header">
 <div>
-<div class="matchup-headline">{g['matchup']}</div>
+<div class="matchup-headline">{g['matchup']} &nbsp;{verdict_badge}</div>
 <div class="matchup-records">{g['away_team']} ({intel.get('away_rec', '--')}) vs {g['home_team']} ({intel.get('home_rec', '--')}) • 🏟️ {intel.get('venue', 'Stadium')}</div>
 </div>
 <div class="weather-badge">🌤️ {g['weather']}</div>
@@ -902,31 +942,31 @@ with tab_dossiers:
 <thead>
 <tr>
 <th>Team / Side</th>
-<th>Moneyline <span class="hold-badge">Hold: {ml_hold}%</span></th>
+<th>Moneyline (Fair Prob) <span class="hold-badge">Hold: {ml_hold}%</span></th>
 <th>{spread_label} <span class="hold-badge">Hold: {spread_hold}%</span></th>
 <th>Total (O/U) <span class="hold-badge">Hold: {total_hold}%</span></th>
-<th>Sizing (Edge / Stake)</th>
+<th>Edge / Kelly Sizing</th>
 </tr>
 </thead>
 <tbody>
 <tr>
 <td style="text-align:left; font-weight:700;">{g['away_team']}</td>
-<td><span class="highlight-edge">{away_ml['odds']}</span><br><span style="color:#94a3b8; font-size:10px;">({away_ml['prob']})</span><br>{away_ml['vel_html']}</td>
-<td>{away_spread['point']} {away_spread['odds']}</td>
-<td>Over {over_tot['point']} {over_tot['odds']}</td>
-<td><span style="color:{'#10b981' if away_ml['edge_raw'] > 0 else '#94a3b8'}; font-weight:800;">{away_ml['edge']}</span><br><span class="highlight-kelly">{away_ml['kelly']}</span></td>
+<td><span class="{away_ml['color_cls']}">{away_ml['odds']}</span><br><span style="color:#94a3b8; font-size:10px;">({away_ml['prob']})</span><br>{away_ml['vel_html']}</td>
+<td><span class="{away_spread['color_cls']}">{away_spread['point']} {away_spread['odds']}</span><br><span style="color:#94a3b8; font-size:10px;">({away_spread['prob']})</span></td>
+<td><span class="{over_tot['color_cls']}">Over {over_tot['point']} {over_tot['odds']}</span><br><span style="color:#94a3b8; font-size:10px;">({over_tot['prob']})</span></td>
+<td><span class="{away_ml['color_cls']}">{away_ml['edge']}</span><br><span class="highlight-kelly">{away_ml['kelly']}</span></td>
 </tr>
 <tr>
 <td style="text-align:left; font-weight:700;">{g['home_team']}</td>
-<td><span class="highlight-edge">{home_ml['odds']}</span><br><span style="color:#94a3b8; font-size:10px;">({home_ml['prob']})</span><br>{home_ml['vel_html']}</td>
-<td>{home_spread['point']} {home_spread['odds']}</td>
-<td>Under {under_tot['point']} {under_tot['odds']}</td>
-<td><span style="color:{'#10b981' if home_ml['edge_raw'] > 0 else '#94a3b8'}; font-weight:800;">{home_ml['edge']}</span><br><span class="highlight-kelly">{home_ml['kelly']}</span></td>
+<td><span class="{home_ml['color_cls']}">{home_ml['odds']}</span><br><span style="color:#94a3b8; font-size:10px;">({home_ml['prob']})</span><br>{home_ml['vel_html']}</td>
+<td><span class="{home_spread['color_cls']}">{home_spread['point']} {home_spread['odds']}</span><br><span style="color:#94a3b8; font-size:10px;">({home_spread['prob']})</span></td>
+<td><span class="{under_tot['color_cls']}">Under {under_tot['point']} {under_tot['odds']}</span><br><span style="color:#94a3b8; font-size:10px;">({under_tot['prob']})</span></td>
+<td><span class="{home_ml['color_cls']}">{home_ml['edge']}</span><br><span class="highlight-kelly">{home_ml['kelly']}</span></td>
 </tr>
 </tbody>
 </table>"""
 
-            # Player Props Section
+            # Optional Player Props Table with Full Color-Coding
             if market_scope == "Player and Team Props":
                 if g["props"]:
                     prop_rows_html = ""
@@ -938,18 +978,19 @@ with tab_dossiers:
                         p_edge = ((p_dec * p_fair) - 1.0) * 100
                         k_pct, k_stake = calculate_kelly(p_dec, p_fair, bankroll, kelly_fraction)
                         k_str = f"${k_stake:.2f}" if k_stake > 0 else f"${flat_unit:.2f}"
+                        p_color_cls = "color-good" if p_edge >= 0 else "color-bad"
                         pt_lbl = f"{p['point']}" if p['point'] is not None else ""
 
                         prop_rows_html += f"""<tr>
 <td style="text-align:left;"><b>{p['description']}</b><br><span style="color:#64748b; font-size:10px;">{p['market'].replace('_', ' ').title()}</span></td>
 <td>{p['name']} {pt_lbl}</td>
-<td><span class="highlight-edge">{decimal_to_american(p_dec)}</span></td>
+<td><span class="{p_color_cls}">{decimal_to_american(p_dec)}</span></td>
 <td>{p_fair*100:.1f}%</td>
-<td style="color:{'#10b981' if p_edge > 0 else '#94a3b8'}; font-weight:700;">{p_edge:+.1f}%</td>
+<td><span class="{p_color_cls}">{p_edge:+.1f}%</span></td>
 <td><span class="highlight-kelly">{k_str}</span></td>
 </tr>"""
 
-                    dossier_html += f"""<div style="font-size: 13px; font-weight: 800; color: #38bdf8; margin: 10px 0 6px 0;">🎯 Player Prop Intelligence</div>
+                    dossier_html += f"""<div style="font-size: 13px; font-weight: 800; color: #38bdf8; margin: 10px 0 6px 0;">🎯 Player Prop Intelligence (Color-Coded Edge)</div>
 <table class="market-table">
 <thead>
 <tr>
@@ -957,8 +998,8 @@ with tab_dossiers:
 <th>Side</th>
 <th>Odds</th>
 <th>Fair %</th>
-<th>Edge</th>
-<th>Wager</th>
+<th>True Edge</th>
+<th>Suggested Wager</th>
 </tr>
 </thead>
 <tbody>{prop_rows_html}</tbody>
@@ -969,31 +1010,39 @@ with tab_dossiers:
 </div>"""
 
             dossier_html += f"""<div class="intel-box">
-💡 <b>System Intelligence:</b> Starts at <b>{g['time']} SK</b>. {context_summary} Primary Edge Read: {top_play}.
+💡 <b>System Intelligence & Recommendation:</b> Game Time: <b>{g['time']} SK</b>. {context_summary} <b>Verdict:</b> {top_play}.
 </div>
 </div>"""
             st.markdown(dossier_html, unsafe_allow_html=True)
 
+            # 1-Click Action Bar
             st.caption(f"⚡ 1-Click Bet Router for {g['matchup']}")
             c_btn_a, c_btn_b, c_btn_c, c_btn_d = st.columns(4)
 
             if away_ml["dec"] > 1.0:
-                if c_btn_a.button(f"⚡ {g['away_team']} ML ({away_ml['odds']}) [${away_ml['k_stake']:.2f}]", key=f"btn_away_ml_{idx_g}"):
+                btn_lbl = f"⚡ {g['away_team']} ML ({away_ml['odds']}) [${away_ml['k_stake']:.2f}]"
+                if c_btn_a.button(btn_lbl, key=f"btn_away_ml_{idx_g}"):
                     log_quick_bet(g["matchup"], f"{g['away_team']} ML", away_ml["odds"], away_ml["k_stake"], f"Edge: {away_ml['edge']} | Hold: {ml_hold}%")
 
             if home_ml["dec"] > 1.0:
-                if c_btn_b.button(f"⚡ {g['home_team']} ML ({home_ml['odds']}) [${home_ml['k_stake']:.2f}]", key=f"btn_home_ml_{idx_g}"):
+                btn_lbl = f"⚡ {g['home_team']} ML ({home_ml['odds']}) [${home_ml['k_stake']:.2f}]"
+                if c_btn_b.button(btn_lbl, key=f"btn_home_ml_{idx_g}"):
                     log_quick_bet(g["matchup"], f"{g['home_team']} ML", home_ml["odds"], home_ml["k_stake"], f"Edge: {home_ml['edge']} | Hold: {ml_hold}%")
 
             if over_tot["dec"] > 1.0:
-                if c_btn_c.button(f"⚡ Over {over_tot['point']} ({over_tot['odds']}) [${over_tot['k_stake']:.2f}]", key=f"btn_over_{idx_g}"):
+                btn_lbl = f"⚡ Over {over_tot['point']} ({over_tot['odds']}) [${over_tot['k_stake']:.2f}]"
+                if c_btn_c.button(btn_lbl, key=f"btn_over_{idx_g}"):
                     log_quick_bet(g["matchup"], f"Over {over_tot['point']}", over_tot["odds"], over_tot["k_stake"], f"Edge: {over_tot['edge']} | Hold: {total_hold}%")
 
             if under_tot["dec"] > 1.0:
-                if c_btn_d.button(f"⚡ Under {under_tot['point']} ({under_tot['odds']}) [${under_tot['k_stake']:.2f}]", key=f"btn_under_{idx_g}"):
+                btn_lbl = f"⚡ Under {under_tot['point']} ({under_tot['odds']}) [${under_tot['k_stake']:.2f}]"
+                if c_btn_d.button(btn_lbl, key=f"btn_under_{idx_g}"):
                     log_quick_bet(g["matchup"], f"Under {under_tot['point']}", under_tot["odds"], under_tot["k_stake"], f"Edge: {under_tot['edge']} | Hold: {total_hold}%")
 
             st.markdown("---")
+
+        if only_pos_ev and rendered_count == 0:
+            st.info("No games currently have mathematical positive edge (+EV) against Pinnacle sharp devigged benchmarks.")
     else:
         st.info("Click '⚡ Scan Board' in the sidebar to populate active game dossiers.")
 
@@ -1010,11 +1059,12 @@ with tab_parlays:
                     prob_list = g["sharp_probs"].get(k, [])
                     if prob_list:
                         fair_p = float(np.mean(prob_list))
+                        edge_calc = ((val["price"] * fair_p) - 1.0) * 100
                         if fair_p >= 0.45:
                             candidate_legs.append({
                                 "game_id": g["id"],
                                 "matchup": g["matchup"],
-                                "pick": f"{g['matchup']} ➔ {val['name']} ({decimal_to_american(val['price'])})",
+                                "pick": f"{g['matchup']} ➔ {val['name']} ({decimal_to_american(val['price'])}) [Edge: {edge_calc:+.1f}%]",
                                 "dec": val["price"],
                                 "prob": fair_p
                             })
@@ -1023,11 +1073,12 @@ with tab_parlays:
                     prob_list = g["sharp_probs"].get(p["ident"], [])
                     if prob_list:
                         fair_p = float(np.mean(prob_list))
+                        edge_calc = ((p["price"] * fair_p) - 1.0) * 100
                         if fair_p >= 0.50:
                             candidate_legs.append({
                                 "game_id": g["id"],
                                 "matchup": g["matchup"],
-                                "pick": f"{p['description']} ➔ {p['name']} {p.get('point', '')} ({decimal_to_american(p['price'])})",
+                                "pick": f"{p['description']} ➔ {p['name']} {p.get('point', '')} ({decimal_to_american(p['price'])}) [Edge: {edge_calc:+.1f}%]",
                                 "dec": p["price"],
                                 "prob": fair_p
                             })
@@ -1051,17 +1102,19 @@ with tab_parlays:
                 joint_prob *= c["prob"]
 
             parlay_us = decimal_to_american(total_dec)
+            parlay_edge = ((total_dec * joint_prob) - 1.0) * 100
             k_pct, parlay_kelly = calculate_kelly(total_dec, joint_prob, bankroll, kelly_fraction)
             p_final_stake = parlay_kelly if parlay_kelly > 0 else flat_unit
+            parlay_color = "#10b981" if parlay_edge >= 0 else "#f87171"
 
-            st.markdown(f"""<div class="game-dossier" style="border: 2px solid #38bdf8;">
+            st.markdown(f"""<div class="game-dossier" style="border: 2px solid {parlay_color};">
 <div class="matchup-headline">Combined Multi-Leg Ticket ({parlay_us})</div>
 <div style="font-size: 12px; color: #94a3b8; margin-bottom: 10px;">{' + '.join([c['pick'] for c in chosen])}</div>
 <div class="tape-row">
 <div class="scout-card">
-    <div class="scout-title">Combined Odds & Pricing</div>
+    <div class="scout-title">Combined Odds & Edge</div>
     <div style="font-size: 15px; font-weight: 800; color: #ffffff;">{parlay_us} ({total_dec:.2f} Dec)</div>
-    <div style="font-size: 11px; font-family: 'JetBrains Mono', monospace; color: #38bdf8; margin-top: 2px;">Independent Win Prob: {round(joint_prob * 100, 1)}%</div>
+    <div style="font-size: 11px; font-family: 'JetBrains Mono', monospace; color: {parlay_color}; margin-top: 2px;">Edge: {parlay_edge:+.1f}% • Win Prob: {round(joint_prob * 100, 1)}%</div>
 </div>
 <div class="scout-card">
     <div class="scout-title">Suggested Wager ({'Kelly' if parlay_kelly > 0 else 'Option B Flat'})</div>
@@ -1077,7 +1130,7 @@ with tab_parlays:
                     " + ".join([c["pick"] for c in chosen]),
                     parlay_us,
                     p_final_stake,
-                    f"Joint Prob: {round(joint_prob*100, 1)}% | SGP Correlated: {is_correlated}"
+                    f"Joint Prob: {round(joint_prob*100, 1)}% | Edge: {parlay_edge:+.1f}% | SGP Correlated: {is_correlated}"
                 )
     else:
         st.info("Scan the board to generate candidate legs.")
