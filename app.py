@@ -129,7 +129,7 @@ st.markdown("""
         background: #070a12;
         border: 1px solid #1e293b;
         border-radius: 8px;
-        padding: 10px 14px;
+        padding: 12px 14px;
     }
     .scout-title {
         font-size: 11px;
@@ -137,6 +137,7 @@ st.markdown("""
         color: #64748b;
         letter-spacing: 0.8px;
         margin-bottom: 4px;
+        font-weight: 700;
     }
     .scout-name {
         font-size: 15px;
@@ -147,7 +148,7 @@ st.markdown("""
         font-size: 12px;
         font-family: 'JetBrains Mono', monospace;
         color: #38bdf8;
-        margin-top: 2px;
+        margin-top: 4px;
     }
     .market-table {
         width: 100%;
@@ -331,10 +332,39 @@ def fetch_weather(home_team: str):
     except Exception:
         return "Normal Outdoor Conditions"
 
+@st.cache_data(ttl=86400, show_spinner=False)
+def fetch_pitcher_profile(person_id: int):
+    """Fetches real pitcher throwing arm and verified regular season stats."""
+    if not person_id:
+        return "RHP", "No verified stats"
+    try:
+        url = f"https://statsapi.mlb.com/api/v1/people/{person_id}?hydrate=stats(group=[pitching],type=[season])"
+        r = requests.get(url, timeout=5).json()
+        person = r.get("people", [{}])[0]
+        hand_code = person.get("pitchHand", {}).get("code", "R")
+        arm_label = f"{hand_code}HP"
+
+        stats_list = person.get("stats", [])
+        if stats_list:
+            splits = stats_list[0].get("splits", [])
+            if splits:
+                s = splits[-1].get("stat", {})
+                w = s.get("wins", 0)
+                l = s.get("losses", 0)
+                era = s.get("era", "-.--")
+                whip = s.get("whip", "-.--")
+                so = s.get("strikeOuts", 0)
+                ip = s.get("inningsPitched", "0.0")
+                return arm_label, f"({w}-{l}) | {era} ERA | {whip} WHIP | {so} K ({ip} IP)"
+
+        return arm_label, "0-0 | Spot Starter"
+    except Exception:
+        return "RHP", "0-0 | Active Roster"
+
 @st.cache_data(ttl=3600, show_spinner=False)
 def fetch_mlb_deep_intel(date_str: str):
     try:
-        url = f"https://statsapi.mlb.com/api/v1/schedule?sportId=1&date={date_str}&hydrate=probablePitcher(stats(type=season)),team(standings)"
+        url = f"https://statsapi.mlb.com/api/v1/schedule?sportId=1&date={date_str}&hydrate=probablePitcher,team(standings)"
         res = requests.get(url, timeout=8).json()
         intel_map = {}
         for d in res.get("dates", []):
@@ -349,39 +379,28 @@ def fetch_mlb_deep_intel(date_str: str):
 
                 away_p = away.get("probablePitcher", {})
                 away_p_name = away_p.get("fullName", "TBD")
-                away_p_hand = away_p.get("pitchHand", {}).get("code", "R")
-                away_p_splits = "0-0 | -.-- ERA"
-                if "stats" in away_p and away_p["stats"]:
-                    splits = away_p["stats"][0].get("splits", [{}])[0].get("stat", {})
-                    w, l = splits.get("wins", 0), splits.get("losses", 0)
-                    era = splits.get("era", "-.--")
-                    whip = splits.get("whip", "-.--")
-                    so = splits.get("strikeOuts", 0)
-                    away_p_splits = f"({w}-{l}) | {era} ERA | {whip} WHIP | {so} K"
+                away_p_id = away_p.get("id")
+                away_hand, away_splits = fetch_pitcher_profile(away_p_id) if away_p_id else ("RHP", "TBD")
 
                 home_p = home.get("probablePitcher", {})
                 home_p_name = home_p.get("fullName", "TBD")
-                home_p_hand = home_p.get("pitchHand", {}).get("code", "R")
-                home_p_splits = "0-0 | -.-- ERA"
-                if "stats" in home_p and home_p["stats"]:
-                    splits = home_p["stats"][0].get("splits", [{}])[0].get("stat", {})
-                    w, l = splits.get("wins", 0), splits.get("losses", 0)
-                    era = splits.get("era", "-.--")
-                    whip = splits.get("whip", "-.--")
-                    so = splits.get("strikeOuts", 0)
-                    home_p_splits = f"({w}-{l}) | {era} ERA | {whip} WHIP | {so} K"
+                home_p_id = home_p.get("id")
+                home_hand, home_splits = fetch_pitcher_profile(home_p_id) if home_p_id else ("RHP", "TBD")
 
-                intel_map[f"{away_name} @ {home_name}"] = {
+                dossier_data = {
                     "away_rec": away_rec,
                     "home_rec": home_rec,
                     "away_p_name": away_p_name,
-                    "away_p_hand": away_p_hand,
-                    "away_p_splits": away_p_splits,
+                    "away_p_hand": away_hand,
+                    "away_p_splits": away_splits,
                     "home_p_name": home_p_name,
-                    "home_p_hand": home_p_hand,
-                    "home_p_splits": home_p_splits,
+                    "home_p_hand": home_hand,
+                    "home_p_splits": home_splits,
                     "venue": g.get("venue", {}).get("name", "Stadium")
                 }
+                intel_map[f"{away_name} @ {home_name}"] = dossier_data
+                # Fallback partial key
+                intel_map[f"{away_name.split()[-1]} @ {home_name.split()[-1]}"] = dossier_data
         return intel_map
     except Exception:
         return {}
@@ -406,14 +425,16 @@ def fetch_espn_sport_intel(sport_slug: str):
             a_rec = away.get("records", [{}])[0].get("summary", "--")
 
             notes = [headline.get("description", "") for headline in comp.get("notes", [])]
-            headline_str = notes[0] if notes else "Conference Matchup"
+            headline_str = notes[0] if notes else "Regular Season"
 
-            stats_map[f"{a_name} @ {h_name}"] = {
+            d_data = {
                 "away_rec": a_rec,
                 "home_rec": h_rec,
                 "headline": headline_str,
                 "venue": comp.get("venue", {}).get("fullName", "Stadium")
             }
+            stats_map[f"{a_name} @ {h_name}"] = d_data
+            stats_map[f"{a_name.split()[-1]} @ {h_name.split()[-1]}"] = d_data
         return stats_map
     except Exception:
         return {}
@@ -458,7 +479,7 @@ sport_key = sport_map[selected_sport_label]
 market_scope = st.sidebar.radio(
     "Market Scope",
     ["Team Markets Only", "Player and Team Props"],
-    help="Team: Mainlines only (H2H, Spread, Total). Player & Team: Adds strikeouts, hits, yards, points, etc.",
+    help="Team: Mainlines only. Player & Team: Adds strikeout, hits, and scoring player props.",
     key="market_scope_radio"
 )
 
@@ -523,7 +544,7 @@ if run_scan:
         if market_scope == "Player and Team Props":
             active_markets.extend(SPORT_PROPS_MAP.get(sport_key, []))
 
-        with st.spinner("Calling API for live bookmaker lines & prop markets..."):
+        with st.spinner("Calling API for live lines and market quotes..."):
             raw_data, rem, used = fetch_events_and_odds(sport_key, active_markets)
             st.session_state.raw_events = raw_data
             st.session_state.api_rem = rem
@@ -533,7 +554,7 @@ if run_scan:
 
 if run_scan or (recalc_only and st.session_state.raw_events):
     try:
-        with st.spinner("Devigging markets, pulling scouting splits, and running Kelly calculations..."):
+        with st.spinner("Resolving confirmed pitcher splits, devigging lines, and calculating Kelly stakes..."):
             target_date_str = now_local.strftime("%Y-%m-%d")
             if "Tomorrow" in date_filter_mode and "Day After" not in date_filter_mode:
                 target_date_str = tomorrow_local.strftime("%Y-%m-%d")
@@ -542,7 +563,6 @@ if run_scan or (recalc_only and st.session_state.raw_events):
             elif date_filter_mode == "Pick Specific Date (Calendar)" and chosen_calendar_date:
                 target_date_str = chosen_calendar_date.strftime("%Y-%m-%d")
 
-            # Ingest free external intel depending on sport
             if "baseball" in sport_key:
                 intel_map = fetch_mlb_deep_intel(target_date_str)
             elif "americanfootball" in sport_key:
@@ -578,13 +598,19 @@ if run_scan or (recalc_only and st.session_state.raw_events):
                 matchup = f"{away_team} @ {home_team}"
                 formatted_time = dt.strftime("%b %d - %I:%M %p")
 
-                # Match intel with fallback
-                game_intel = intel_map.get(matchup, {
-                    "away_rec": "--", "home_rec": "--",
-                    "away_p_name": "TBD", "away_p_hand": "R", "away_p_splits": "No starts recorded",
-                    "home_p_name": "TBD", "home_p_hand": "R", "home_p_splits": "No starts recorded",
-                    "headline": "Active Slate", "venue": f"{home_team} Stadium"
-                })
+                # Match intel with exact or team mascot fallback
+                game_intel = intel_map.get(
+                    matchup,
+                    intel_map.get(
+                        f"{away_team.split()[-1]} @ {home_team.split()[-1]}",
+                        {
+                            "away_rec": "--", "home_rec": "--",
+                            "away_p_name": "TBD", "away_p_hand": "RHP", "away_p_splits": "No starts recorded",
+                            "home_p_name": "TBD", "home_p_hand": "RHP", "home_p_splits": "No starts recorded",
+                            "headline": "Active Slate", "venue": f"{home_team} Stadium"
+                        }
+                    )
+                )
                 weather_info = fetch_weather(home_team)
 
                 market_probs = {}
@@ -606,7 +632,8 @@ if run_scan or (recalc_only and st.session_state.raw_events):
 
                             for idx, o in enumerate(valid_outcomes):
                                 player_desc = o.get("description", "")
-                                ident = f"{m_key}_{player_desc}_{o['name']}_{o.get('point', '')}"
+                                point_val = o.get("point", None)
+                                ident = f"{m_key}_{player_desc}_{o['name']}_{point_val}"
 
                                 if is_sharp and idx < len(devigged):
                                     if ident not in market_probs:
@@ -626,7 +653,7 @@ if run_scan or (recalc_only and st.session_state.raw_events):
                                     line_dict = {
                                         "name": o["name"],
                                         "description": player_desc,
-                                        "point": o.get("point", None),
+                                        "point": point_val,
                                         "price": o["price"],
                                         "market": m_key,
                                         "velocity": velocity,
@@ -675,37 +702,50 @@ with tab_dossiers:
             p_lines = g["playnow"]
             s_probs = g["sharp_probs"]
 
-            def get_line_data(m_key, side_name):
-                for k, val in p_lines.items():
-                    if k.startswith(m_key) and side_name in val["name"]:
-                        dec = val["price"]
-                        prob_list = s_probs.get(k, [])
-                        fair_p = float(np.mean(prob_list)) if prob_list else (1.0 / dec)
-                        edge = ((dec * fair_p) - 1.0) * 100
-                        pt_str = f" ({val['point']:+})" if val['point'] is not None else ""
-                        vel = val.get("velocity", "◼ STABLE")
-                        badge_class = "steam-badge-up" if "STEAM" in vel else ("steam-badge-down" if "DRIFT" in vel else "steam-badge-flat")
+            # Mainline selector: prioritizes authentic baseball lines (1.5) and near-even money totals
+            def get_best_line(m_key, side_name):
+                matching = [val for k, val in p_lines.items() if k.startswith(m_key) and side_name in val["name"]]
+                if not matching:
+                    return {"odds": "---", "prob": "---", "edge": "---", "point": "", "raw_prob": 0, "kelly": "---", "vel_html": ""}
 
-                        k_pct, k_stake = calculate_kelly(dec, fair_p, bankroll, kelly_fraction)
-                        kelly_str = f"${k_stake:.2f}" if k_stake > 0 else "---"
+                # Prioritize standard 1.5 spread for MLB
+                if is_mlb and m_key == "spreads":
+                    standard = [m for m in matching if m["point"] is not None and abs(abs(m["point"]) - 1.5) < 0.01]
+                    best_item = standard[0] if standard else matching[0]
+                elif m_key == "totals":
+                    # Pick total closest to standard -110 (1.91)
+                    best_item = min(matching, key=lambda x: abs(x["price"] - 1.91))
+                else:
+                    best_item = matching[0]
 
-                        return {
-                            "odds": decimal_to_american(dec),
-                            "prob": f"{fair_p*100:.1f}%",
-                            "edge": f"+{edge:.1f}%" if edge >= 0 else f"{edge:.1f}%",
-                            "point": pt_str,
-                            "raw_prob": fair_p * 100,
-                            "kelly": kelly_str,
-                            "vel_html": f"<span class='{badge_class}'>{vel}</span>"
-                        }
-                return {"odds": "---", "prob": "---", "edge": "---", "point": "", "raw_prob": 0, "kelly": "---", "vel_html": ""}
+                dec = best_item["price"]
+                k_ident = best_item["ident"]
+                prob_list = s_probs.get(k_ident, [])
+                fair_p = float(np.mean(prob_list)) if prob_list else (1.0 / dec)
+                edge = ((dec * fair_p) - 1.0) * 100
+                pt_str = f" ({best_item['point']:+})" if best_item['point'] is not None else ""
+                vel = best_item.get("velocity", "◼ STABLE")
+                badge_class = "steam-badge-up" if "STEAM" in vel else ("steam-badge-down" if "DRIFT" in vel else "steam-badge-flat")
 
-            away_ml = get_line_data("h2h", g["away_team"])
-            home_ml = get_line_data("h2h", g["home_team"])
-            away_spread = get_line_data("spreads", g["away_team"])
-            home_spread = get_line_data("spreads", g["home_team"])
-            over_tot = get_line_data("totals", "Over")
-            under_tot = get_line_data("totals", "Under")
+                k_pct, k_stake = calculate_kelly(dec, fair_p, bankroll, kelly_fraction)
+                kelly_str = f"${k_stake:.2f}" if k_stake > 0 else "---"
+
+                return {
+                    "odds": decimal_to_american(dec),
+                    "prob": f"{fair_p*100:.1f}%",
+                    "edge": f"+{edge:.1f}%" if edge >= 0 else f"{edge:.1f}%",
+                    "point": pt_str,
+                    "raw_prob": fair_p * 100,
+                    "kelly": kelly_str,
+                    "vel_html": f"<span class='{badge_class}'>{vel}</span>"
+                }
+
+            away_ml = get_best_line("h2h", g["away_team"])
+            home_ml = get_best_line("h2h", g["home_team"])
+            away_spread = get_best_line("spreads", g["away_team"])
+            home_spread = get_best_line("spreads", g["home_team"])
+            over_tot = get_best_line("totals", "Over")
+            under_tot = get_best_line("totals", "Under")
 
             top_play = "No Value Identified"
             top_prob = 0
@@ -720,23 +760,23 @@ with tab_dossiers:
             if is_mlb:
                 tape_row_html = f"""<div class="tape-row">
 <div class="scout-card">
-    <div class="scout-title">Away Starter ({intel.get('away_p_hand', 'R')}HP)</div>
+    <div class="scout-title">Away Starter ({intel.get('away_p_hand', 'RHP')})</div>
     <div class="scout-name">⚾ {intel.get('away_p_name', 'TBD')}</div>
-    <div class="scout-splits">{intel.get('away_p_splits', '0-0 | -.-- ERA')}</div>
+    <div class="scout-splits">{intel.get('away_p_splits', 'No verified stats')}</div>
 </div>
 <div class="scout-card">
-    <div class="scout-title">Home Starter ({intel.get('home_p_hand', 'R')}HP)</div>
+    <div class="scout-title">Home Starter ({intel.get('home_p_hand', 'RHP')})</div>
     <div class="scout-name">⚾ {intel.get('home_p_name', 'TBD')}</div>
-    <div class="scout-splits">{intel.get('home_p_splits', '0-0 | -.-- ERA')}</div>
+    <div class="scout-splits">{intel.get('home_p_splits', 'No verified stats')}</div>
 </div>
 </div>"""
-                context_summary = f"Starting Pitchers: <b>{intel.get('away_p_name', 'TBD')} vs {intel.get('home_p_name', 'TBD')}</b>. Stadium conditions: <b>{g['weather']}</b>."
+                context_summary = f"Starting Pitchers: <b>{intel.get('away_p_name', 'TBD')} ({intel.get('away_p_hand', '')}) vs {intel.get('home_p_name', 'TBD')} ({intel.get('home_p_hand', '')})</b>. Weather: <b>{g['weather']}</b>."
             elif is_nfl:
                 tape_row_html = f"""<div class="tape-row">
 <div class="scout-card">
     <div class="scout-title">Away Team ({intel.get('away_rec', '--')})</div>
     <div class="scout-name">🏈 {g['away_team']}</div>
-    <div class="scout-splits">Trench Matchup • {intel.get('headline', 'Standard Slate')}</div>
+    <div class="scout-splits">{intel.get('headline', 'Trench & Injury Profile')}</div>
 </div>
 <div class="scout-card">
     <div class="scout-title">Home Team ({intel.get('home_rec', '--')})</div>
@@ -750,7 +790,7 @@ with tab_dossiers:
 <div class="scout-card">
     <div class="scout-title">Away Team ({intel.get('away_rec', '--')})</div>
     <div class="scout-name">🏀 {g['away_team']}</div>
-    <div class="scout-splits">Pace / Transition Matchup</div>
+    <div class="scout-splits">Pace & Net Rating Profile</div>
 </div>
 <div class="scout-card">
     <div class="scout-title">Home Team ({intel.get('home_rec', '--')})</div>
@@ -903,7 +943,6 @@ with tab_parlays:
     candidate_legs = []
     if st.session_state.dossiers:
         for g in st.session_state.dossiers:
-            # Mainlines
             for k, val in g["playnow"].items():
                 if 1.05 < val["price"] < 3.50:
                     prob_list = g["sharp_probs"].get(k, [])
@@ -917,7 +956,6 @@ with tab_parlays:
                                 "dec": val["price"],
                                 "prob": fair_p
                             })
-            # Player Props
             for p in g.get("props", []):
                 if 1.40 < p["price"] < 2.50:
                     prob_list = g["sharp_probs"].get(p["ident"], [])
