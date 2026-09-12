@@ -180,6 +180,11 @@ st.markdown("""
         color: #38bdf8;
         font-weight: 700;
     }
+    .hold-badge {
+        font-size: 11px;
+        color: #f59e0b;
+        font-weight: 700;
+    }
     .intel-box {
         background: rgba(15, 23, 42, 0.8);
         border-left: 3px solid #10b981;
@@ -189,6 +194,7 @@ st.markdown("""
         color: #cbd5e1;
         line-height: 1.5;
         margin-top: 10px;
+        margin-bottom: 12px;
     }
     .steam-badge-up {
         background: rgba(16, 185, 129, 0.15);
@@ -282,6 +288,15 @@ def american_to_decimal(us_str: str) -> float:
     except Exception:
         return 1.909
 
+def calculate_market_hold(decimal_odds_list: list[float]) -> float:
+    """Calculates bookmaker hold (theoretical margin) as a percentage."""
+    valid_dec = [d for d in decimal_odds_list if d and d > 1.0]
+    if len(valid_dec) < 2:
+        return 0.0
+    total_implied = sum(1.0 / d for d in valid_dec)
+    hold = (1.0 - (1.0 / total_implied)) * 100.0
+    return round(hold, 1)
+
 def power_devig(raw_probs: list) -> list:
     if not raw_probs or sum(raw_probs) <= 0:
         return []
@@ -313,6 +328,27 @@ def calculate_kelly(dec_odds: float, win_prob: float, bankroll: float, fraction:
     suggested_stake = round(bankroll * frac_k, 2)
     return round(frac_k * 100, 2), suggested_stake
 
+# --- LOGGING HELPER ---
+def log_quick_bet(matchup: str, pick: str, odds: str, stake: float, notes: str):
+    try:
+        sheet = conn.read(spreadsheet=GOOGLE_SHEET_URL, worksheet="Sheet1", ttl=0)
+        new_row = pd.DataFrame([{
+            "Date": datetime.now(LOCAL_TZ).strftime("%Y-%m-%d %I:%M %p"),
+            "Matchup": matchup,
+            "Pick": pick,
+            "Sportsbook": "PlayNow SK",
+            "Odds": odds,
+            "Stake": stake,
+            "EV_Percent": "Quick-Click Log",
+            "Status": "Open",
+            "Notes": notes
+        }])
+        updated = pd.concat([sheet, new_row], ignore_index=True) if not sheet.empty else new_row
+        conn.update(spreadsheet=GOOGLE_SHEET_URL, worksheet="Sheet1", data=updated)
+        st.toast(f"Logged {pick} ({odds}) for ${stake:.2f} CAD!", icon="⚡")
+    except Exception as e:
+        st.error(f"Sheet write failure: {e}")
+
 # --- FREE SCOUTING INTEL & WEATHER ENGINES ---
 @st.cache_data(ttl=7200, show_spinner=False)
 def fetch_weather(home_team: str):
@@ -334,7 +370,6 @@ def fetch_weather(home_team: str):
 
 @st.cache_data(ttl=86400, show_spinner=False)
 def fetch_pitcher_profile(person_id: int):
-    """Fetches real pitcher throwing arm and verified regular season stats."""
     if not person_id:
         return "RHP", "No verified stats"
     try:
@@ -399,7 +434,6 @@ def fetch_mlb_deep_intel(date_str: str):
                     "venue": g.get("venue", {}).get("name", "Stadium")
                 }
                 intel_map[f"{away_name} @ {home_name}"] = dossier_data
-                # Fallback partial key
                 intel_map[f"{away_name.split()[-1]} @ {home_name.split()[-1]}"] = dossier_data
         return intel_map
     except Exception:
@@ -503,8 +537,9 @@ if date_filter_mode == "Pick Specific Date (Calendar)":
     chosen_calendar_date = st.sidebar.date_input("Select Date", value=now_local.date(), key="cal_date_picker")
 
 st.sidebar.markdown("---")
-st.sidebar.markdown("**Bankroll & Kelly Sizing**")
+st.sidebar.markdown("**Bankroll & Flat Wager Sizing**")
 bankroll = st.sidebar.number_input("Bankroll ($ CAD)", min_value=10.0, value=1000.0, step=50.0, key="bankroll_input")
+flat_unit = st.sidebar.number_input("Option B Flat Wager ($ CAD)", min_value=1.0, value=10.0, step=5.0, help="Default stake when edge is negative/neutral", key="flat_unit_input")
 kelly_fraction_label = st.sidebar.selectbox("Kelly Risk Tier", ["Quarter Kelly (0.25) - Sharp Std", "Half Kelly (0.50) - Aggressive", "Full Kelly (1.00) - Theoretical Max"], key="kelly_fraction_select")
 kelly_fraction = 0.25 if "Quarter" in kelly_fraction_label else (0.50 if "Half" in kelly_fraction_label else 1.0)
 
@@ -514,7 +549,7 @@ recalc_only = col_b2.button("🔄 Re-Analyze", key="recalc_btn")
 
 # --- STATS SUMMARY BAR ---
 st.markdown("<div class='terminal-title'>⚡ PYLOS PARLAYS <span class='accent-pill'>SHARP COMMAND</span></div>", unsafe_allow_html=True)
-st.markdown("<div class='terminal-sub'>POWER DEVIGGED ➔ KELLY CRITERION ➔ DEEP SCOUTING INTEL ➔ SASKATCHEWAN TERMINAL</div>", unsafe_allow_html=True)
+st.markdown("<div class='terminal-sub'>POWER DEVIGGED ➔ EDGE & HOLD INTEL ➔ 1-CLICK LOGGING ➔ SASKATCHEWAN TERMINAL</div>", unsafe_allow_html=True)
 
 st.markdown(f"""
 <div class='metric-grid'>
@@ -544,7 +579,7 @@ if run_scan:
         if market_scope == "Player and Team Props":
             active_markets.extend(SPORT_PROPS_MAP.get(sport_key, []))
 
-        with st.spinner("Calling API for live lines and market quotes..."):
+        with st.spinner("Calling API for live market feeds..."):
             raw_data, rem, used = fetch_events_and_odds(sport_key, active_markets)
             st.session_state.raw_events = raw_data
             st.session_state.api_rem = rem
@@ -554,7 +589,7 @@ if run_scan:
 
 if run_scan or (recalc_only and st.session_state.raw_events):
     try:
-        with st.spinner("Resolving confirmed pitcher splits, devigging lines, and calculating Kelly stakes..."):
+        with st.spinner("Devigging odds, calculating book holds, and preparing 1-tap bet routing..."):
             target_date_str = now_local.strftime("%Y-%m-%d")
             if "Tomorrow" in date_filter_mode and "Day After" not in date_filter_mode:
                 target_date_str = tomorrow_local.strftime("%Y-%m-%d")
@@ -598,7 +633,6 @@ if run_scan or (recalc_only and st.session_state.raw_events):
                 matchup = f"{away_team} @ {home_team}"
                 formatted_time = dt.strftime("%b %d - %I:%M %p")
 
-                # Match intel with exact or team mascot fallback
                 game_intel = intel_map.get(
                     matchup,
                     intel_map.get(
@@ -680,7 +714,7 @@ if run_scan or (recalc_only and st.session_state.raw_events):
 
             st.session_state.dossiers = compiled
             if compiled:
-                st.success(f"Built {len(compiled)} Complete Dossiers ({market_scope})!")
+                st.success(f"Loaded {len(compiled)} Matchups with Full Market Hold Analytics!")
             else:
                 st.info("No active games matched your selected schedule.")
     except Exception as ex:
@@ -702,18 +736,16 @@ with tab_dossiers:
             p_lines = g["playnow"]
             s_probs = g["sharp_probs"]
 
-            # Mainline selector: prioritizes authentic baseball lines (1.5) and near-even money totals
+            # Precision mainline selector
             def get_best_line(m_key, side_name):
                 matching = [val for k, val in p_lines.items() if k.startswith(m_key) and side_name in val["name"]]
                 if not matching:
-                    return {"odds": "---", "prob": "---", "edge": "---", "point": "", "raw_prob": 0, "kelly": "---", "vel_html": ""}
+                    return {"odds": "---", "prob": "---", "edge": "---", "point": "", "raw_prob": 0, "kelly": "---", "dec": 0, "edge_raw": 0, "k_stake": 0, "vel_html": ""}
 
-                # Prioritize standard 1.5 spread for MLB
                 if is_mlb and m_key == "spreads":
                     standard = [m for m in matching if m["point"] is not None and abs(abs(m["point"]) - 1.5) < 0.01]
                     best_item = standard[0] if standard else matching[0]
                 elif m_key == "totals":
-                    # Pick total closest to standard -110 (1.91)
                     best_item = min(matching, key=lambda x: abs(x["price"] - 1.91))
                 else:
                     best_item = matching[0]
@@ -722,21 +754,24 @@ with tab_dossiers:
                 k_ident = best_item["ident"]
                 prob_list = s_probs.get(k_ident, [])
                 fair_p = float(np.mean(prob_list)) if prob_list else (1.0 / dec)
-                edge = ((dec * fair_p) - 1.0) * 100
+                edge_val = ((dec * fair_p) - 1.0) * 100
                 pt_str = f" ({best_item['point']:+})" if best_item['point'] is not None else ""
                 vel = best_item.get("velocity", "◼ STABLE")
                 badge_class = "steam-badge-up" if "STEAM" in vel else ("steam-badge-down" if "DRIFT" in vel else "steam-badge-flat")
 
                 k_pct, k_stake = calculate_kelly(dec, fair_p, bankroll, kelly_fraction)
-                kelly_str = f"${k_stake:.2f}" if k_stake > 0 else "---"
+                kelly_str = f"${k_stake:.2f}" if k_stake > 0 else f"${flat_unit:.2f} (Flat)"
 
                 return {
                     "odds": decimal_to_american(dec),
                     "prob": f"{fair_p*100:.1f}%",
-                    "edge": f"+{edge:.1f}%" if edge >= 0 else f"{edge:.1f}%",
+                    "edge": f"+{edge_val:.1f}%" if edge_val >= 0 else f"{edge_val:.1f}%",
                     "point": pt_str,
                     "raw_prob": fair_p * 100,
                     "kelly": kelly_str,
+                    "dec": dec,
+                    "edge_raw": edge_val,
+                    "k_stake": k_stake if k_stake > 0 else flat_unit,
                     "vel_html": f"<span class='{badge_class}'>{vel}</span>"
                 }
 
@@ -747,16 +782,21 @@ with tab_dossiers:
             over_tot = get_best_line("totals", "Over")
             under_tot = get_best_line("totals", "Under")
 
+            # Market Hold (Juice) Calculations
+            ml_hold = calculate_market_hold([away_ml["dec"], home_ml["dec"]])
+            spread_hold = calculate_market_hold([away_spread["dec"], home_spread["dec"]])
+            total_hold = calculate_market_hold([over_tot["dec"], under_tot["dec"]])
+
             top_play = "No Value Identified"
             top_prob = 0
             if home_ml["raw_prob"] > top_prob:
                 top_prob = home_ml["raw_prob"]
-                top_play = f"Back <b>{g['home_team']} ML</b> (Sharp Prob: {home_ml['prob']} | Kelly: {home_ml['kelly']})"
+                top_play = f"Back <b>{g['home_team']} ML</b> (Sharp Prob: {home_ml['prob']} | Edge: {home_ml['edge']})"
             if away_ml["raw_prob"] > top_prob:
                 top_prob = away_ml["raw_prob"]
-                top_play = f"Back <b>{g['away_team']} ML</b> (Sharp Prob: {away_ml['prob']} | Kelly: {away_ml['kelly']})"
+                top_play = f"Back <b>{g['away_team']} ML</b> (Sharp Prob: {away_ml['prob']} | Edge: {away_ml['edge']})"
 
-            # Sport-specific Scouting Cards
+            # Sport Scouting Layout
             if is_mlb:
                 tape_row_html = f"""<div class="tape-row">
 <div class="scout-card">
@@ -785,34 +825,6 @@ with tab_dossiers:
 </div>
 </div>"""
                 context_summary = f"Matchup notes: <b>{intel.get('headline', 'NFL Game')}</b>. Venue: <b>{intel.get('venue', 'Stadium')}</b>."
-            elif is_nba:
-                tape_row_html = f"""<div class="tape-row">
-<div class="scout-card">
-    <div class="scout-title">Away Team ({intel.get('away_rec', '--')})</div>
-    <div class="scout-name">🏀 {g['away_team']}</div>
-    <div class="scout-splits">Pace & Net Rating Profile</div>
-</div>
-<div class="scout-card">
-    <div class="scout-title">Home Team ({intel.get('home_rec', '--')})</div>
-    <div class="scout-name">🏀 {g['home_team']}</div>
-    <div class="scout-splits">{intel.get('headline', 'Regular Season')}</div>
-</div>
-</div>"""
-                context_summary = f"Venue: <b>{intel.get('venue', 'Arena')}</b>."
-            elif is_nhl:
-                tape_row_html = f"""<div class="tape-row">
-<div class="scout-card">
-    <div class="scout-title">Away Team ({intel.get('away_rec', '--')})</div>
-    <div class="scout-name">🏒 {g['away_team']}</div>
-    <div class="scout-splits">5v5 xGF% & Special Teams Duel</div>
-</div>
-<div class="scout-card">
-    <div class="scout-title">Home Team ({intel.get('home_rec', '--')})</div>
-    <div class="scout-name">🏒 {g['home_team']}</div>
-    <div class="scout-splits">{intel.get('headline', 'Regular Season')}</div>
-</div>
-</div>"""
-                context_summary = f"Matchup hosted at <b>{intel.get('venue', 'Arena')}</b>."
             else:
                 tape_row_html = ""
                 context_summary = f"Venue: <b>{intel.get('venue', 'Arena')}</b>."
@@ -831,10 +843,10 @@ with tab_dossiers:
 <thead>
 <tr>
 <th>Team / Side</th>
-<th>Moneyline (PlayNow / Fair)</th>
-<th>{spread_label}</th>
-<th>Total (O/U)</th>
-<th>Kelly Sizing ({kelly_fraction_label.split(' ')[0]})</th>
+<th>Moneyline <span class="hold-badge">(Hold: {ml_hold}%)</span></th>
+<th>{spread_label} <span class="hold-badge">(Hold: {spread_hold}%)</span></th>
+<th>Total (O/U) <span class="hold-badge">(Hold: {total_hold}%)</span></th>
+<th>Sizing (Edge / Stake)</th>
 </tr>
 </thead>
 <tbody>
@@ -843,29 +855,29 @@ with tab_dossiers:
 <td><span class="highlight-edge">{away_ml['odds']}</span> ({away_ml['prob']}) {away_ml['vel_html']}</td>
 <td>{away_spread['point']} {away_spread['odds']}</td>
 <td>Over {over_tot['point']} {over_tot['odds']}</td>
-<td><span class="highlight-kelly">{away_ml['kelly']}</span></td>
+<td><span style="color:{'#10b981' if away_ml['edge_raw'] > 0 else '#94a3b8'}; font-weight:800;">{away_ml['edge']}</span> | <span class="highlight-kelly">{away_ml['kelly']}</span></td>
 </tr>
 <tr>
 <td style="text-align:left; font-weight:700;">{g['home_team']}</td>
 <td><span class="highlight-edge">{home_ml['odds']}</span> ({home_ml['prob']}) {home_ml['vel_html']}</td>
 <td>{home_spread['point']} {home_spread['odds']}</td>
 <td>Under {under_tot['point']} {under_tot['odds']}</td>
-<td><span class="highlight-kelly">{home_ml['kelly']}</span></td>
+<td><span style="color:{'#10b981' if home_ml['edge_raw'] > 0 else '#94a3b8'}; font-weight:800;">{home_ml['edge']}</span> | <span class="highlight-kelly">{home_ml['kelly']}</span></td>
 </tr>
 </tbody>
 </table>"""
 
-            # Optional Player Props Table
+            # Optional Player Props Table with Hold & Edge
             if market_scope == "Player and Team Props" and g["props"]:
                 prop_rows_html = ""
-                for p in g["props"][:8]:
+                for p in g["props"][:6]:
                     p_dec = p["price"]
                     p_ident = p["ident"]
                     p_probs = s_probs.get(p_ident, [])
                     p_fair = float(np.mean(p_probs)) if p_probs else (1.0 / p_dec)
                     p_edge = ((p_dec * p_fair) - 1.0) * 100
                     k_pct, k_stake = calculate_kelly(p_dec, p_fair, bankroll, kelly_fraction)
-                    k_str = f"${k_stake:.2f}" if k_stake > 0 else "---"
+                    k_str = f"${k_stake:.2f}" if k_stake > 0 else f"${flat_unit:.2f} (Flat)"
                     pt_lbl = f"{p['point']}" if p['point'] is not None else ""
 
                     prop_rows_html += f"""<tr>
@@ -885,60 +897,47 @@ with tab_dossiers:
 <th>Side / Line</th>
 <th>PlayNow Odds</th>
 <th>Fair Prob</th>
-<th>Edge %</th>
-<th>Kelly Sizing</th>
+<th>True Edge %</th>
+<th>Suggested Wager</th>
 </tr>
 </thead>
 <tbody>{prop_rows_html}</tbody>
 </table>"""
 
             dossier_html += f"""<div class="intel-box">
-💡 <b>System Intelligence:</b> Starts at <b>{g['time']} SK</b>. {context_summary} Primary Sharp Metric: {top_play}.
+💡 <b>System Intelligence:</b> Starts at <b>{g['time']} SK</b>. {context_summary} Primary Edge Read: {top_play}.
 </div>
 </div>"""
             st.markdown(dossier_html, unsafe_allow_html=True)
 
-        # Quick Log Form to Google Sheets
-        st.markdown("---")
-        st.markdown("### 📝 Quick-Log Pick to Google Sheet")
-        with st.form("dossier_logger_form", clear_on_submit=False):
-            match_names = [f"{d['matchup']} ({d['time']} SK)" for d in st.session_state.dossiers]
-            chosen_match_idx = st.selectbox("Select Matchup", range(len(match_names)), format_func=lambda x: match_names[x], key="logger_match_idx")
-            active_match = st.session_state.dossiers[chosen_match_idx]
+            # 1-Click Action Bar (Option B: Kelly stake if +EV, Flat Unit if Neutral/Negative)
+            st.caption(f"⚡ 1-Click Bet Router for {g['matchup']}")
+            c_btn_a, c_btn_b, c_btn_c, c_btn_d = st.columns(4)
 
-            c1, c2, c3 = st.columns(3)
-            pick_selection = c1.text_input("Your Pick", value=f"{active_match['home_team']} ML", key="logger_pick_val")
-            wager_odds = c2.text_input("Odds Taken", value="-110", key="logger_odds_val")
-            bet_amount = c3.number_input("Wager ($ CAD)", min_value=1.0, value=10.0, step=5.0, key="logger_stake_val")
+            if away_ml["dec"] > 1.0:
+                if c_btn_a.button(f"⚡ {g['away_team']} ML ({away_ml['odds']}) [${away_ml['k_stake']:.2f}]", key=f"btn_away_ml_{idx_g}"):
+                    log_quick_bet(g["matchup"], f"{g['away_team']} ML", away_ml["odds"], away_ml["k_stake"], f"Edge: {away_ml['edge']} | Hold: {ml_hold}%")
 
-            record_dossier_btn = st.form_submit_button("Record Pick to Google Sheets", type="primary")
+            if home_ml["dec"] > 1.0:
+                if c_btn_b.button(f"⚡ {g['home_team']} ML ({home_ml['odds']}) [${home_ml['k_stake']:.2f}]", key=f"btn_home_ml_{idx_g}"):
+                    log_quick_bet(g["matchup"], f"{g['home_team']} ML", home_ml["odds"], home_ml["k_stake"], f"Edge: {home_ml['edge']} | Hold: {ml_hold}%")
 
-            if record_dossier_btn:
-                try:
-                    sheet = conn.read(spreadsheet=GOOGLE_SHEET_URL, worksheet="Sheet1", ttl=0)
-                    new_row = pd.DataFrame([{
-                        "Date": datetime.now(LOCAL_TZ).strftime("%Y-%m-%d %I:%M %p"),
-                        "Matchup": active_match["matchup"],
-                        "Pick": pick_selection,
-                        "Sportsbook": "PlayNow SK",
-                        "Odds": wager_odds,
-                        "Stake": bet_amount,
-                        "EV_Percent": "Dossier Log",
-                        "Status": "Open",
-                        "Notes": f"Kelly Sized | Weather: {active_match['weather']}"
-                    }])
-                    updated = pd.concat([sheet, new_row], ignore_index=True) if not sheet.empty else new_row
-                    conn.update(spreadsheet=GOOGLE_SHEET_URL, worksheet="Sheet1", data=updated)
-                    st.success("Successfully logged pick to Google Sheets!")
-                except Exception as e:
-                    st.error(f"Sheet error: {e}. Check Google Sheet sharing permissions.")
+            if over_tot["dec"] > 1.0:
+                if c_btn_c.button(f"⚡ Over {over_tot['point']} ({over_tot['odds']}) [${over_tot['k_stake']:.2f}]", key=f"btn_over_{idx_g}"):
+                    log_quick_bet(g["matchup"], f"Over {over_tot['point']}", over_tot["odds"], over_tot["k_stake"], f"Edge: {over_tot['edge']} | Hold: {total_hold}%")
+
+            if under_tot["dec"] > 1.0:
+                if c_btn_d.button(f"⚡ Under {under_tot['point']} ({under_tot['odds']}) [${under_tot['k_stake']:.2f}]", key=f"btn_under_{idx_g}"):
+                    log_quick_bet(g["matchup"], f"Under {under_tot['point']}", under_tot["odds"], under_tot["k_stake"], f"Edge: {under_tot['edge']} | Hold: {total_hold}%")
+
+            st.markdown("---")
     else:
         st.info("Click '⚡ Scan Board' in the sidebar to populate active game dossiers.")
 
 # --- PARLAY ARCHITECT TAB ---
 with tab_parlays:
     st.markdown("### ⚡ Correlation-Safe Parlay Architect")
-    st.caption("Cross-game parlay builder with Kelly bankroll allocation.")
+    st.caption("Cross-game parlay builder with Kelly and Option B flat bet allocation.")
 
     candidate_legs = []
     if st.session_state.dossiers:
@@ -990,6 +989,7 @@ with tab_parlays:
 
             parlay_us = decimal_to_american(total_dec)
             k_pct, parlay_kelly = calculate_kelly(total_dec, joint_prob, bankroll, kelly_fraction)
+            p_final_stake = parlay_kelly if parlay_kelly > 0 else flat_unit
 
             st.markdown(f"""<div class="game-dossier" style="border: 2px solid #38bdf8;">
 <div class="matchup-headline">Combined Multi-Leg Ticket ({parlay_us})</div>
@@ -1001,42 +1001,25 @@ with tab_parlays:
     <div style="font-size: 12px; font-family: 'JetBrains Mono', monospace; color: #38bdf8; margin-top: 2px;">Independent Win Prob: {round(joint_prob * 100, 1)}%</div>
 </div>
 <div class="scout-card">
-    <div class="scout-title">Suggested Kelly Stake ({kelly_fraction_label.split(' ')[0]})</div>
-    <div style="font-size: 16px; font-weight: 800; color: #38bdf8;">${parlay_kelly:.2f} CAD</div>
-    <div style="font-size: 12px; font-family: 'JetBrains Mono', monospace; color: #10b981; margin-top: 2px;">Est. Payout: ${round(parlay_kelly * total_dec, 2) if parlay_kelly > 0 else round(10 * total_dec, 2)} CAD</div>
+    <div class="scout-title">Suggested Wager ({'Kelly' if parlay_kelly > 0 else 'Option B Flat'})</div>
+    <div style="font-size: 16px; font-weight: 800; color: #38bdf8;">${p_final_stake:.2f} CAD</div>
+    <div style="font-size: 12px; font-family: 'JetBrains Mono', monospace; color: #10b981; margin-top: 2px;">Est. Payout: ${round(p_final_stake * total_dec, 2)} CAD</div>
 </div>
 </div>
 </div>""", unsafe_allow_html=True)
 
-            with st.form("parlay_logger_form", clear_on_submit=False):
-                p_stake = st.number_input("Wager Amount ($ CAD)", min_value=1.0, value=float(parlay_kelly) if parlay_kelly > 0 else 10.0, step=5.0, key="parlay_stake_input")
-                p_status = st.selectbox("Ticket Status", ["Open", "Won", "Lost", "Push"], key="parlay_status_select")
-                p_submit = st.form_submit_button("Record Parlay to Sheet", type="primary")
-
-                if p_submit:
-                    try:
-                        sheet = conn.read(spreadsheet=GOOGLE_SHEET_URL, worksheet="Sheet1", ttl=0)
-                        new_row = pd.DataFrame([{
-                            "Date": datetime.now(LOCAL_TZ).strftime("%Y-%m-%d %I:%M %p"),
-                            "Matchup": f"{len(chosen)}-Leg Parlay",
-                            "Pick": " + ".join([c["pick"] for c in chosen]),
-                            "Sportsbook": "PlayNow SK",
-                            "Odds": parlay_us,
-                            "Stake": p_stake,
-                            "EV_Percent": "Parlay Ticket",
-                            "Status": p_status,
-                            "Notes": f"Joint Win Prob: {round(joint_prob*100, 1)}% | Kelly Rec: ${parlay_kelly:.2f}"
-                        }])
-                        updated = pd.concat([sheet, new_row], ignore_index=True) if not sheet.empty else new_row
-                        conn.update(spreadsheet=GOOGLE_SHEET_URL, worksheet="Sheet1", data=updated)
-                        st.success("Parlay recorded to Google Sheets!")
-                    except Exception as e:
-                        st.error(f"Sheet error: {e}")
+            if st.button(f"⚡ 1-Click Record Parlay Ticket (${p_final_stake:.2f})", type="primary", key="parlay_one_click_btn"):
+                log_quick_bet(
+                    f"{len(chosen)}-Leg Parlay",
+                    " + ".join([c["pick"] for c in chosen]),
+                    parlay_us,
+                    p_final_stake,
+                    f"Joint Prob: {round(joint_prob*100, 1)}% | SGP Correlated: {is_correlated}"
+                )
     else:
         st.info("Scan the board to generate candidate legs.")
 
 # --- GOOGLE SHEET VIEWER & CLV AUDITOR ---
-st.markdown("---")
 with st.expander("📊 View Betting_Tracker Google Sheet & Run CLV Review"):
     c_btn1, c_btn2 = st.columns([1, 2])
     if c_btn1.button("🔄 Refresh Sheet History", key="refresh_sheet_btn"):
