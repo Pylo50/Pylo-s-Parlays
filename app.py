@@ -32,81 +32,81 @@ st.markdown("""
     }
     .terminal-title {
         font-weight: 800;
-        font-size: 28px;
+        font-size: 26px;
         letter-spacing: -0.5px;
         color: #ffffff;
     }
     .accent-pill {
         background: linear-gradient(135deg, #10b981 0%, #059669 100%);
         color: #ffffff;
-        font-size: 13px;
+        font-size: 12px;
         font-weight: 800;
-        padding: 3px 10px;
+        padding: 2px 8px;
         border-radius: 6px;
         display: inline-block;
-        box-shadow: 0 0 12px rgba(16, 185, 129, 0.35);
+        box-shadow: 0 0 10px rgba(16, 185, 129, 0.35);
         vertical-align: middle;
         margin-left: 6px;
     }
     .terminal-sub {
         color: #94a3b8;
-        font-size: 13px;
+        font-size: 12px;
         font-family: 'JetBrains Mono', monospace;
         margin-top: 4px;
-        margin-bottom: 18px;
+        margin-bottom: 16px;
     }
     .metric-grid {
         display: grid;
         grid-template-columns: repeat(4, 1fr);
-        gap: 12px;
-        margin-bottom: 20px;
+        gap: 10px;
+        margin-bottom: 18px;
     }
     .stat-cube {
         background: rgba(15, 23, 42, 0.7);
         border: 1px solid #1e293b;
-        border-radius: 12px;
-        padding: 12px;
+        border-radius: 10px;
+        padding: 10px;
         text-align: center;
-        box-shadow: 0 4px 14px rgba(0, 0, 0, 0.4);
+        box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
         backdrop-filter: blur(10px);
     }
     .stat-cube-val {
         font-family: 'JetBrains Mono', monospace;
-        font-size: 24px;
+        font-size: 20px;
         font-weight: 800;
         color: #38bdf8;
     }
     .stat-cube-lbl {
-        font-size: 11px;
+        font-size: 10px;
         text-transform: uppercase;
-        letter-spacing: 0.8px;
+        letter-spacing: 0.6px;
         color: #64748b;
         margin-top: 2px;
     }
     .game-dossier {
         background: linear-gradient(145deg, rgba(15, 23, 42, 0.95) 0%, rgba(11, 15, 25, 0.98) 100%);
         border: 1px solid #334155;
-        border-radius: 16px;
-        padding: 20px;
-        margin-bottom: 22px;
-        box-shadow: 0 10px 25px rgba(0, 0, 0, 0.5);
+        border-radius: 14px;
+        padding: 16px;
+        margin-bottom: 18px;
+        box-shadow: 0 8px 20px rgba(0, 0, 0, 0.5);
     }
     .dossier-header {
         display: flex;
         justify-content: space-between;
         align-items: center;
         border-bottom: 1px solid #1e293b;
-        padding-bottom: 12px;
-        margin-bottom: 14px;
+        padding-bottom: 10px;
+        margin-bottom: 12px;
     }
     .matchup-headline {
-        font-size: 20px;
+        font-size: 18px;
         font-weight: 800;
         color: #ffffff;
         letter-spacing: -0.3px;
     }
     .matchup-records {
-        font-size: 13px;
+        font-size: 12px;
         color: #94a3b8;
         font-family: 'JetBrains Mono', monospace;
     }
@@ -115,61 +115,73 @@ st.markdown("""
         color: #38bdf8;
         border: 1px solid rgba(56, 189, 248, 0.3);
         border-radius: 6px;
-        font-size: 12px;
+        font-size: 11px;
         font-family: 'JetBrains Mono', monospace;
-        padding: 4px 10px;
+        padding: 3px 8px;
+        text-align: right;
     }
     .tape-row {
         display: grid;
         grid-template-columns: 1fr 1fr;
-        gap: 12px;
-        margin-bottom: 14px;
+        gap: 10px;
+        margin-bottom: 12px;
     }
     .scout-card {
         background: #070a12;
         border: 1px solid #1e293b;
         border-radius: 8px;
-        padding: 12px 14px;
+        padding: 10px;
+        min-height: 82px;
     }
     .scout-title {
-        font-size: 11px;
+        font-size: 10px;
         text-transform: uppercase;
         color: #64748b;
-        letter-spacing: 0.8px;
-        margin-bottom: 4px;
+        letter-spacing: 0.6px;
         font-weight: 700;
+        margin-bottom: 3px;
     }
     .scout-name {
-        font-size: 15px;
+        font-size: 14px;
         font-weight: 800;
         color: #ffffff;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
     }
-    .scout-splits {
-        font-size: 12px;
+    .scout-stat-line {
+        font-size: 11px;
         font-family: 'JetBrains Mono', monospace;
         color: #38bdf8;
-        margin-top: 4px;
+        line-height: 1.35;
+        margin-top: 3px;
+    }
+    .scout-stat-sub {
+        font-size: 10.5px;
+        font-family: 'JetBrains Mono', monospace;
+        color: #94a3b8;
+        line-height: 1.3;
     }
     .market-table {
         width: 100%;
         border-collapse: collapse;
-        margin-bottom: 14px;
+        margin-bottom: 12px;
         font-family: 'JetBrains Mono', monospace;
     }
     .market-table th {
         background: rgba(30, 41, 59, 0.6);
         color: #94a3b8;
-        font-size: 11px;
+        font-size: 10px;
         text-transform: uppercase;
         letter-spacing: 0.5px;
-        padding: 8px;
+        padding: 6px 4px;
         text-align: center;
         border: 1px solid #1e293b;
     }
     .market-table td {
-        padding: 8px 10px;
+        padding: 6px 4px;
         border: 1px solid #1e293b;
-        font-size: 13px;
+        font-size: 12px;
         text-align: center;
     }
     .highlight-edge {
@@ -181,47 +193,54 @@ st.markdown("""
         font-weight: 700;
     }
     .hold-badge {
-        font-size: 11px;
+        font-size: 9.5px;
         color: #f59e0b;
         font-weight: 700;
+        display: block;
     }
     .intel-box {
         background: rgba(15, 23, 42, 0.8);
         border-left: 3px solid #10b981;
         border-radius: 6px;
-        padding: 10px 14px;
-        font-size: 12.5px;
+        padding: 8px 12px;
+        font-size: 11.5px;
         color: #cbd5e1;
-        line-height: 1.5;
-        margin-top: 10px;
-        margin-bottom: 12px;
+        line-height: 1.45;
+        margin-top: 8px;
+        margin-bottom: 10px;
     }
     .steam-badge-up {
         background: rgba(16, 185, 129, 0.15);
         color: #10b981;
-        font-size: 11px;
+        font-size: 10px;
         font-weight: 700;
-        padding: 2px 6px;
-        border-radius: 4px;
+        padding: 1px 4px;
+        border-radius: 3px;
         border: 1px solid #10b981;
+        display: inline-block;
+        margin-top: 2px;
     }
     .steam-badge-down {
         background: rgba(239, 68, 68, 0.15);
         color: #f87171;
-        font-size: 11px;
+        font-size: 10px;
         font-weight: 700;
-        padding: 2px 6px;
-        border-radius: 4px;
+        padding: 1px 4px;
+        border-radius: 3px;
         border: 1px solid #ef4444;
+        display: inline-block;
+        margin-top: 2px;
     }
     .steam-badge-flat {
         background: rgba(148, 163, 184, 0.15);
         color: #94a3b8;
-        font-size: 11px;
+        font-size: 10px;
         font-weight: 700;
-        padding: 2px 6px;
-        border-radius: 4px;
+        padding: 1px 4px;
+        border-radius: 3px;
         border: 1px solid #475569;
+        display: inline-block;
+        margin-top: 2px;
     }
 </style>
 """, unsafe_allow_html=True)
@@ -265,7 +284,8 @@ STADIUM_COORDS = {
     "Seattle Mariners": (47.591, -122.332), "Detroit Lions": (42.340, -83.045),
     "New Orleans Saints": (29.951, -90.081), "Kansas City Chiefs": (39.048, -94.483),
     "Arizona Cardinals": (33.527, -112.262), "Los Angeles Chargers": (33.953, -118.338),
-    "Minnesota Vikings": (44.973, -93.257), "Green Bay Packers": (44.501, -88.062)
+    "Minnesota Vikings": (44.973, -93.257), "Green Bay Packers": (44.501, -88.062),
+    "Pittsburgh Pirates": (40.446, -80.005)
 }
 
 # --- MATHEMATICAL ENGINES ---
@@ -348,7 +368,7 @@ def log_quick_bet(matchup: str, pick: str, odds: str, stake: float, notes: str):
     except Exception as e:
         st.error(f"Sheet write failure: {e}")
 
-# --- ODDS API DISPATCHERS ---
+# --- SECURE ODDS API DISPATCHERS ---
 def fetch_mainlines(sport_key: str):
     url = f"{BASE_URL}/{sport_key}/odds"
     params = {
@@ -367,12 +387,12 @@ def fetch_mainlines(sport_key: str):
 
 @st.cache_data(ttl=600, show_spinner=False)
 def fetch_event_props(sport_key: str, event_id: str, prop_markets: tuple):
-    if not prop_markets:
+    if not prop_markets or not event_id:
         return []
     url = f"{BASE_URL}/{sport_key}/events/{event_id}/odds"
     params = {
         "apiKey": ODDS_API_KEY,
-        "regions": "ca,eu",
+        "regions": "ca,us,eu",
         "markets": ",".join(prop_markets),
         "oddsFormat": "decimal",
     }
@@ -384,7 +404,7 @@ def fetch_event_props(sport_key: str, event_id: str, prop_markets: tuple):
     except Exception:
         return []
 
-# --- FREE SCOUTING INTEL & WEATHER ENGINES ---
+# --- SCOUTING INTEL & WEATHER ENGINES ---
 @st.cache_data(ttl=7200, show_spinner=False)
 def fetch_weather(home_team: str):
     if home_team in INDOOR_VENUES:
@@ -406,7 +426,7 @@ def fetch_weather(home_team: str):
 @st.cache_data(ttl=86400, show_spinner=False)
 def fetch_pitcher_profile(person_id: int):
     if not person_id:
-        return "RHP", "No verified stats"
+        return "RHP", "No verified stats", ""
     try:
         url = f"https://statsapi.mlb.com/api/v1/people/{person_id}?hydrate=stats(group=[pitching],type=[season])"
         r = requests.get(url, timeout=5).json()
@@ -425,11 +445,13 @@ def fetch_pitcher_profile(person_id: int):
                 whip = s.get("whip", "-.--")
                 so = s.get("strikeOuts", 0)
                 ip = s.get("inningsPitched", "0.0")
-                return arm_label, f"({w}-{l}) | {era} ERA | {whip} WHIP | {so} K ({ip} IP)"
+                line1 = f"({w}-{l}) • {era} ERA"
+                line2 = f"{whip} WHIP • {so} K ({ip} IP)"
+                return arm_label, line1, line2
 
-        return arm_label, "0-0 | Spot Starter"
+        return arm_label, "0-0 • Spot Starter", "Active Roster"
     except Exception:
-        return "RHP", "0-0 | Active Roster"
+        return "RHP", "0-0 • Active Roster", ""
 
 @st.cache_data(ttl=3600, show_spinner=False)
 def fetch_mlb_deep_intel(date_str: str):
@@ -450,22 +472,24 @@ def fetch_mlb_deep_intel(date_str: str):
                 away_p = away.get("probablePitcher", {})
                 away_p_name = away_p.get("fullName", "TBD")
                 away_p_id = away_p.get("id")
-                away_hand, away_splits = fetch_pitcher_profile(away_p_id) if away_p_id else ("RHP", "TBD")
+                away_hand, away_l1, away_l2 = fetch_pitcher_profile(away_p_id) if away_p_id else ("RHP", "TBD", "")
 
                 home_p = home.get("probablePitcher", {})
                 home_p_name = home_p.get("fullName", "TBD")
                 home_p_id = home_p.get("id")
-                home_hand, home_splits = fetch_pitcher_profile(home_p_id) if home_p_id else ("RHP", "TBD")
+                home_hand, home_l1, home_l2 = fetch_pitcher_profile(home_p_id) if home_p_id else ("RHP", "TBD", "")
 
                 dossier_data = {
                     "away_rec": away_rec,
                     "home_rec": home_rec,
                     "away_p_name": away_p_name,
                     "away_p_hand": away_hand,
-                    "away_p_splits": away_splits,
+                    "away_p_l1": away_l1,
+                    "away_p_l2": away_l2,
                     "home_p_name": home_p_name,
                     "home_p_hand": home_hand,
-                    "home_p_splits": home_splits,
+                    "home_p_l1": home_l1,
+                    "home_p_l2": home_l2,
                     "venue": g.get("venue", {}).get("name", "Stadium")
                 }
                 intel_map[f"{away_name} @ {home_name}"] = dossier_data
@@ -660,8 +684,10 @@ if run_scan or (recalc_only and st.session_state.raw_events):
                         f"{away_team.split()[-1]} @ {home_team.split()[-1]}",
                         {
                             "away_rec": "--", "home_rec": "--",
-                            "away_p_name": "TBD", "away_p_hand": "RHP", "away_p_splits": "No starts recorded",
-                            "home_p_name": "TBD", "home_p_hand": "RHP", "home_p_splits": "No starts recorded",
+                            "away_p_name": "TBD", "away_p_hand": "RHP",
+                            "away_p_l1": "No verified stats", "away_p_l2": "",
+                            "home_p_name": "TBD", "home_p_hand": "RHP",
+                            "home_p_l1": "No verified stats", "home_p_l2": "",
                             "headline": "Active Slate", "venue": f"{home_team} Stadium"
                         }
                     )
@@ -700,7 +726,11 @@ if run_scan or (recalc_only and st.session_state.raw_events):
                                         market_probs[ident] = []
                                     market_probs[ident].append(devigged[idx])
 
-                                if "playnow" in bm_k:
+                                # Accept lines from PlayNow or general consensus for props
+                                is_playnow = "playnow" in bm_k
+                                is_prop_book = not is_sharp and m_key not in ["h2h", "spreads", "totals"]
+
+                                if is_playnow or is_prop_book:
                                     old_price = st.session_state.odds_history.get(ident, o["price"])
                                     if o["price"] > old_price:
                                         velocity = "▲ DRIFT"
@@ -717,13 +747,17 @@ if run_scan or (recalc_only and st.session_state.raw_events):
                                         "price": o["price"],
                                         "market": m_key,
                                         "velocity": velocity,
-                                        "ident": ident
+                                        "ident": ident,
+                                        "book": bm.get("title", "Market")
                                     }
 
                                     if m_key in ["h2h", "spreads", "totals"]:
-                                        playnow_lines[ident] = line_dict
+                                        if is_playnow:
+                                            playnow_lines[ident] = line_dict
                                     else:
-                                        props_data.append(line_dict)
+                                        # Deduplicate props by player and market line
+                                        if not any(p["ident"] == ident for p in props_data):
+                                            props_data.append(line_dict)
 
                 compiled.append({
                     "id": event_id or matchup,
@@ -820,17 +854,20 @@ with tab_dossiers:
                 top_prob = away_ml["raw_prob"]
                 top_play = f"Back <b>{g['away_team']} ML</b> (Sharp Prob: {away_ml['prob']} | Edge: {away_ml['edge']})"
 
+            # Mobile-optimized 2-line stat cards
             if is_mlb:
                 tape_row_html = f"""<div class="tape-row">
 <div class="scout-card">
     <div class="scout-title">Away Starter ({intel.get('away_p_hand', 'RHP')})</div>
     <div class="scout-name">⚾ {intel.get('away_p_name', 'TBD')}</div>
-    <div class="scout-splits">{intel.get('away_p_splits', 'No verified stats')}</div>
+    <div class="scout-stat-line">{intel.get('away_p_l1', 'No verified stats')}</div>
+    <div class="scout-stat-sub">{intel.get('away_p_l2', '')}</div>
 </div>
 <div class="scout-card">
     <div class="scout-title">Home Starter ({intel.get('home_p_hand', 'RHP')})</div>
     <div class="scout-name">⚾ {intel.get('home_p_name', 'TBD')}</div>
-    <div class="scout-splits">{intel.get('home_p_splits', 'No verified stats')}</div>
+    <div class="scout-stat-line">{intel.get('home_p_l1', 'No verified stats')}</div>
+    <div class="scout-stat-sub">{intel.get('home_p_l2', '')}</div>
 </div>
 </div>"""
                 context_summary = f"Starting Pitchers: <b>{intel.get('away_p_name', 'TBD')} ({intel.get('away_p_hand', '')}) vs {intel.get('home_p_name', 'TBD')} ({intel.get('home_p_hand', '')})</b>. Weather: <b>{g['weather']}</b>."
@@ -839,12 +876,12 @@ with tab_dossiers:
 <div class="scout-card">
     <div class="scout-title">Away Team ({intel.get('away_rec', '--')})</div>
     <div class="scout-name">🏈 {g['away_team']}</div>
-    <div class="scout-splits">{intel.get('headline', 'Trench & Injury Profile')}</div>
+    <div class="scout-stat-line">{intel.get('headline', 'Trench & Injury Profile')}</div>
 </div>
 <div class="scout-card">
     <div class="scout-title">Home Team ({intel.get('home_rec', '--')})</div>
     <div class="scout-name">🏈 {g['home_team']}</div>
-    <div class="scout-splits">Stadium Weather • {g['weather']}</div>
+    <div class="scout-stat-line">Stadium Weather • {g['weather']}</div>
 </div>
 </div>"""
                 context_summary = f"Matchup notes: <b>{intel.get('headline', 'NFL Game')}</b>. Venue: <b>{intel.get('venue', 'Stadium')}</b>."
@@ -865,44 +902,46 @@ with tab_dossiers:
 <thead>
 <tr>
 <th>Team / Side</th>
-<th>Moneyline <span class="hold-badge">(Hold: {ml_hold}%)</span></th>
-<th>{spread_label} <span class="hold-badge">(Hold: {spread_hold}%)</span></th>
-<th>Total (O/U) <span class="hold-badge">(Hold: {total_hold}%)</span></th>
+<th>Moneyline <span class="hold-badge">Hold: {ml_hold}%</span></th>
+<th>{spread_label} <span class="hold-badge">Hold: {spread_hold}%</span></th>
+<th>Total (O/U) <span class="hold-badge">Hold: {total_hold}%</span></th>
 <th>Sizing (Edge / Stake)</th>
 </tr>
 </thead>
 <tbody>
 <tr>
 <td style="text-align:left; font-weight:700;">{g['away_team']}</td>
-<td><span class="highlight-edge">{away_ml['odds']}</span> ({away_ml['prob']}) {away_ml['vel_html']}</td>
+<td><span class="highlight-edge">{away_ml['odds']}</span><br><span style="color:#94a3b8; font-size:10px;">({away_ml['prob']})</span><br>{away_ml['vel_html']}</td>
 <td>{away_spread['point']} {away_spread['odds']}</td>
 <td>Over {over_tot['point']} {over_tot['odds']}</td>
-<td><span style="color:{'#10b981' if away_ml['edge_raw'] > 0 else '#94a3b8'}; font-weight:800;">{away_ml['edge']}</span> | <span class="highlight-kelly">{away_ml['kelly']}</span></td>
+<td><span style="color:{'#10b981' if away_ml['edge_raw'] > 0 else '#94a3b8'}; font-weight:800;">{away_ml['edge']}</span><br><span class="highlight-kelly">{away_ml['kelly']}</span></td>
 </tr>
 <tr>
 <td style="text-align:left; font-weight:700;">{g['home_team']}</td>
-<td><span class="highlight-edge">{home_ml['odds']}</span> ({home_ml['prob']}) {home_ml['vel_html']}</td>
+<td><span class="highlight-edge">{home_ml['odds']}</span><br><span style="color:#94a3b8; font-size:10px;">({home_ml['prob']})</span><br>{home_ml['vel_html']}</td>
 <td>{home_spread['point']} {home_spread['odds']}</td>
 <td>Under {under_tot['point']} {under_tot['odds']}</td>
-<td><span style="color:{'#10b981' if home_ml['edge_raw'] > 0 else '#94a3b8'}; font-weight:800;">{home_ml['edge']}</span> | <span class="highlight-kelly">{home_ml['kelly']}</span></td>
+<td><span style="color:{'#10b981' if home_ml['edge_raw'] > 0 else '#94a3b8'}; font-weight:800;">{home_ml['edge']}</span><br><span class="highlight-kelly">{home_ml['kelly']}</span></td>
 </tr>
 </tbody>
 </table>"""
 
-            if market_scope == "Player and Team Props" and g["props"]:
-                prop_rows_html = ""
-                for p in g["props"][:6]:
-                    p_dec = p["price"]
-                    p_ident = p["ident"]
-                    p_probs = s_probs.get(p_ident, [])
-                    p_fair = float(np.mean(p_probs)) if p_probs else (1.0 / p_dec)
-                    p_edge = ((p_dec * p_fair) - 1.0) * 100
-                    k_pct, k_stake = calculate_kelly(p_dec, p_fair, bankroll, kelly_fraction)
-                    k_str = f"${k_stake:.2f}" if k_stake > 0 else f"${flat_unit:.2f} (Flat)"
-                    pt_lbl = f"{p['point']}" if p['point'] is not None else ""
+            # Player Props Section
+            if market_scope == "Player and Team Props":
+                if g["props"]:
+                    prop_rows_html = ""
+                    for p in g["props"][:8]:
+                        p_dec = p["price"]
+                        p_ident = p["ident"]
+                        p_probs = s_probs.get(p_ident, [])
+                        p_fair = float(np.mean(p_probs)) if p_probs else (1.0 / p_dec)
+                        p_edge = ((p_dec * p_fair) - 1.0) * 100
+                        k_pct, k_stake = calculate_kelly(p_dec, p_fair, bankroll, kelly_fraction)
+                        k_str = f"${k_stake:.2f}" if k_stake > 0 else f"${flat_unit:.2f}"
+                        pt_lbl = f"{p['point']}" if p['point'] is not None else ""
 
-                    prop_rows_html += f"""<tr>
-<td style="text-align:left;"><b>{p['description']}</b> - {p['market'].replace('_', ' ').title()}</td>
+                        prop_rows_html += f"""<tr>
+<td style="text-align:left;"><b>{p['description']}</b><br><span style="color:#64748b; font-size:10px;">{p['market'].replace('_', ' ').title()}</span></td>
 <td>{p['name']} {pt_lbl}</td>
 <td><span class="highlight-edge">{decimal_to_american(p_dec)}</span></td>
 <td>{p_fair*100:.1f}%</td>
@@ -910,20 +949,24 @@ with tab_dossiers:
 <td><span class="highlight-kelly">{k_str}</span></td>
 </tr>"""
 
-                dossier_html += f"""<h5 style="color:#38bdf8; margin: 14px 0 8px 0;">🎯 Top Player Prop Markets</h5>
+                    dossier_html += f"""<div style="font-size: 13px; font-weight: 800; color: #38bdf8; margin: 10px 0 6px 0;">🎯 Player Prop Intelligence</div>
 <table class="market-table">
 <thead>
 <tr>
-<th>Player & Market</th>
-<th>Side / Line</th>
-<th>PlayNow Odds</th>
-<th>Fair Prob</th>
-<th>True Edge %</th>
-<th>Suggested Wager</th>
+<th>Player / Prop</th>
+<th>Side</th>
+<th>Odds</th>
+<th>Fair %</th>
+<th>Edge</th>
+<th>Wager</th>
 </tr>
 </thead>
 <tbody>{prop_rows_html}</tbody>
 </table>"""
+                else:
+                    dossier_html += """<div style="background: rgba(15, 23, 42, 0.5); border: 1px dashed #334155; border-radius: 6px; padding: 8px 12px; margin-top: 8px; font-size: 11.5px; color: #94a3b8;">
+🎯 <b>Player Props:</b> Awaiting oddsmaker posting for this slate.
+</div>"""
 
             dossier_html += f"""<div class="intel-box">
 💡 <b>System Intelligence:</b> Starts at <b>{g['time']} SK</b>. {context_summary} Primary Edge Read: {top_play}.
@@ -1013,17 +1056,17 @@ with tab_parlays:
 
             st.markdown(f"""<div class="game-dossier" style="border: 2px solid #38bdf8;">
 <div class="matchup-headline">Combined Multi-Leg Ticket ({parlay_us})</div>
-<div style="font-size: 13px; color: #94a3b8; margin-bottom: 12px;">{' + '.join([c['pick'] for c in chosen])}</div>
+<div style="font-size: 12px; color: #94a3b8; margin-bottom: 10px;">{' + '.join([c['pick'] for c in chosen])}</div>
 <div class="tape-row">
 <div class="scout-card">
     <div class="scout-title">Combined Odds & Pricing</div>
-    <div style="font-size: 16px; font-weight: 800; color: #ffffff;">{parlay_us} ({total_dec:.2f} Dec)</div>
-    <div style="font-size: 12px; font-family: 'JetBrains Mono', monospace; color: #38bdf8; margin-top: 2px;">Independent Win Prob: {round(joint_prob * 100, 1)}%</div>
+    <div style="font-size: 15px; font-weight: 800; color: #ffffff;">{parlay_us} ({total_dec:.2f} Dec)</div>
+    <div style="font-size: 11px; font-family: 'JetBrains Mono', monospace; color: #38bdf8; margin-top: 2px;">Independent Win Prob: {round(joint_prob * 100, 1)}%</div>
 </div>
 <div class="scout-card">
     <div class="scout-title">Suggested Wager ({'Kelly' if parlay_kelly > 0 else 'Option B Flat'})</div>
-    <div style="font-size: 16px; font-weight: 800; color: #38bdf8;">${p_final_stake:.2f} CAD</div>
-    <div style="font-size: 12px; font-family: 'JetBrains Mono', monospace; color: #10b981; margin-top: 2px;">Est. Payout: ${round(p_final_stake * total_dec, 2)} CAD</div>
+    <div style="font-size: 15px; font-weight: 800; color: #38bdf8;">${p_final_stake:.2f} CAD</div>
+    <div style="font-size: 11px; font-family: 'JetBrains Mono', monospace; color: #10b981; margin-top: 2px;">Est. Payout: ${round(p_final_stake * total_dec, 2)} CAD</div>
 </div>
 </div>
 </div>""", unsafe_allow_html=True)
