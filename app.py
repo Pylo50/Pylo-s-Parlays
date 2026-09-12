@@ -374,6 +374,145 @@ STADIUM_COORDS = {
     "Philadelphia Eagles": (39.901, -75.167), "Washington Commanders": (38.907, -76.864)
 }
 
+# --- MOCK / SAMPLE DATA (for testing the UI without burning API credits) ---
+MOCK_TEAM_POOL = {
+    "baseball_mlb": [("New York Yankees", "Boston Red Sox"), ("Los Angeles Dodgers", "San Francisco Giants")],
+    "americanfootball_nfl": [("Kansas City Chiefs", "Buffalo Bills"), ("Dallas Cowboys", "Philadelphia Eagles")],
+    "basketball_nba": [("Boston Celtics", "Miami Heat"), ("Golden State Warriors", "Los Angeles Lakers")],
+    "icehockey_nhl": [("Toronto Maple Leafs", "Montreal Canadiens"), ("Edmonton Oilers", "Calgary Flames")],
+}
+
+MOCK_PLAYER_POOL = {
+    "baseball_mlb": {
+        "pitcher_strikeouts": [("Gerrit Cole", 6.5), ("Zack Wheeler", 5.5)],
+        "batter_hits": [("Aaron Judge", 1.5), ("Mookie Betts", 1.5)],
+        "batter_home_runs": [("Aaron Judge", 0.5), ("Shohei Ohtani", 0.5)],
+    },
+    "americanfootball_nfl": {
+        "player_pass_yds": [("Patrick Mahomes", 275.5), ("Josh Allen", 260.5)],
+        "player_rush_yds": [("Christian McCaffrey", 85.5), ("Saquon Barkley", 78.5)],
+        "player_reception_yds": [("Travis Kelce", 65.5), ("Tyreek Hill", 90.5)],
+        "player_receptions": [("Travis Kelce", 5.5), ("Tyreek Hill", 6.5)],
+    },
+    "basketball_nba": {
+        "player_points": [("Jayson Tatum", 27.5), ("Jimmy Butler", 22.5)],
+        "player_rebounds": [("Jayson Tatum", 8.5), ("Bam Adebayo", 9.5)],
+        "player_assists": [("Jayson Tatum", 4.5), ("Jimmy Butler", 5.5)],
+    },
+    "icehockey_nhl": {
+        "player_points": [("Auston Matthews", 1.5), ("Nick Suzuki", 0.5)],
+        "player_shots_on_goal": [("Auston Matthews", 3.5), ("Nick Suzuki", 2.5)],
+    },
+}
+
+def _mock_price(fair_dec: float, vig: float) -> float:
+    """
+    Applies a vig adjustment to a fair decimal price to simulate a real
+    bookmaker line. Positive vig = juiced (worse) price. Negative vig =
+    deliberately soft/mispriced line, used to simulate a +EV test case.
+    """
+    fair_prob = 1.0 / fair_dec
+    juiced_prob = min(0.97, max(0.03, fair_prob * (1 + vig)))
+    return round(1.0 / juiced_prob, 3)
+
+def generate_mock_mainlines(sport_key: str, now_local: datetime):
+    """Builds a fake but realistically-shaped Odds API response, including
+    one deliberately soft PlayNow price (game 0) so the +EV path can be
+    tested, and one normally-juiced game (PASS path)."""
+    pairs = MOCK_TEAM_POOL.get(sport_key, [("Sample Home", "Sample Away")])
+    offsets_hours = [4, 22, 46]
+    events = []
+    for i, (home, away) in enumerate(pairs):
+        offset = offsets_hours[i % len(offsets_hours)]
+        commence = (now_local + timedelta(hours=offset)).astimezone(timezone.utc)
+        event_id = f"mock_{sport_key}_{i}"
+
+        home_fair_p = 0.55 if i % 2 == 0 else 0.48
+        away_fair_p = 1.0 - home_fair_p
+        home_fair_dec = round(1.0 / home_fair_p, 3)
+        away_fair_dec = round(1.0 / away_fair_p, 3)
+        playnow_vig = -0.04 if i == 0 else 0.05  # game 0 = soft/+EV, rest = normally juiced
+
+        bookmakers = [
+            {
+                "key": "pinnacle", "title": "Pinnacle",
+                "markets": [
+                    {"key": "h2h", "outcomes": [
+                        {"name": home, "price": home_fair_dec},
+                        {"name": away, "price": away_fair_dec},
+                    ]},
+                    {"key": "spreads", "outcomes": [
+                        {"name": home, "price": 1.95, "point": -1.5},
+                        {"name": away, "price": 1.95, "point": 1.5},
+                    ]},
+                    {"key": "totals", "outcomes": [
+                        {"name": "Over", "price": 1.95, "point": 8.5},
+                        {"name": "Under", "price": 1.95, "point": 8.5},
+                    ]},
+                ]
+            },
+            {
+                "key": "betonlineag", "title": "BookMaker",
+                "markets": [
+                    {"key": "h2h", "outcomes": [
+                        {"name": home, "price": _mock_price(home_fair_dec, 0.02)},
+                        {"name": away, "price": _mock_price(away_fair_dec, 0.02)},
+                    ]},
+                ]
+            },
+            {
+                "key": "playnow", "title": "PlayNow SK",
+                "markets": [
+                    {"key": "h2h", "outcomes": [
+                        {"name": home, "price": _mock_price(home_fair_dec, playnow_vig)},
+                        {"name": away, "price": _mock_price(away_fair_dec, 0.05)},
+                    ]},
+                    {"key": "spreads", "outcomes": [
+                        {"name": home, "price": _mock_price(1.95, 0.05), "point": -1.5},
+                        {"name": away, "price": _mock_price(1.95, 0.05), "point": 1.5},
+                    ]},
+                    {"key": "totals", "outcomes": [
+                        {"name": "Over", "price": _mock_price(1.95, 0.05), "point": 8.5},
+                        {"name": "Under", "price": _mock_price(1.95, 0.05), "point": 8.5},
+                    ]},
+                ]
+            },
+        ]
+
+        events.append({
+            "id": event_id,
+            "commence_time": commence.strftime("%Y-%m-%dT%H:%M:%SZ"),
+            "home_team": home,
+            "away_team": away,
+            "bookmakers": bookmakers
+        })
+    return events
+
+def generate_mock_props(sport_key: str, event_id: str):
+    """Fake per-event player prop bookmakers, shaped like the real API."""
+    prop_defs = MOCK_PLAYER_POOL.get(sport_key, {})
+    pinnacle_markets, playnow_markets = [], []
+    for market_key, players in prop_defs.items():
+        p_out, pn_out = [], []
+        for player_name, line in players:
+            fair_dec = 1.91
+            p_out.append({"name": "Over", "description": player_name, "price": fair_dec, "point": line})
+            p_out.append({"name": "Under", "description": player_name, "price": fair_dec, "point": line})
+            pn_out.append({"name": "Over", "description": player_name, "price": _mock_price(fair_dec, 0.05), "point": line})
+            pn_out.append({"name": "Under", "description": player_name, "price": _mock_price(fair_dec, 0.05), "point": line})
+        pinnacle_markets.append({"key": market_key, "outcomes": p_out})
+        playnow_markets.append({"key": market_key, "outcomes": pn_out})
+    return [
+        {"key": "pinnacle", "title": "Pinnacle", "markets": pinnacle_markets},
+        {"key": "playnow", "title": "PlayNow SK", "markets": playnow_markets},
+    ]
+
+def generate_mock_last5(player_name: str, prop_market: str) -> str:
+    """Deterministic placeholder Last-5 for UI testing only — clearly a
+    sample-mode value, never mixed with real data."""
+    seed = sum(ord(c) for c in (player_name + prop_market)) % 6
+    return f"Last 5: {seed}/5 Over (Sample)"
+
 # --- MATHEMATICAL ENGINES ---
 def decimal_to_american(dec: float) -> str:
     if dec is None or dec <= 1.0:
@@ -839,6 +978,14 @@ market_scope = st.sidebar.radio(
     key="market_scope_radio"
 )
 
+st.sidebar.markdown("---")
+use_mock_data = st.sidebar.checkbox(
+    "🧪 Use Sample Data (No API Calls)",
+    value=False,
+    help="Test the UI, edge math, and Kelly sizing with fake sample odds. Spends zero Odds API credits.",
+    key="mock_mode_checkbox"
+)
+
 now_local = datetime.now(LOCAL_TZ)
 tomorrow_local = (now_local + timedelta(days=1)).date()
 day_after_local = (now_local + timedelta(days=2)).date()
@@ -873,6 +1020,9 @@ recalc_only = col_b2.button("🔄 Re-Analyze", key="recalc_btn")
 st.markdown("<div class='terminal-title'>⚡ PYLOS PARLAYS <span class='accent-pill'>SHARP COMMAND</span></div>", unsafe_allow_html=True)
 st.markdown("<div class='terminal-sub'>COLOR-CODED SHARP VALUE ➔ GREEN: +EV | RED: -EV ➔ SASKATCHEWAN TERMINAL</div>", unsafe_allow_html=True)
 
+if use_mock_data:
+    st.warning("🧪 SAMPLE DATA MODE — no live Odds API calls are being made. All prices, players, and 'Last 5' values below are synthetic test fixtures, not real markets.")
+
 st.markdown(f"""
 <div class='metric-grid'>
     <div class='stat-cube'>
@@ -897,11 +1047,17 @@ st.markdown(f"""
 # --- SCANNING & CALCULATION ENGINE ---
 if run_scan:
     try:
-        with st.spinner("Calling API for live mainline feeds..."):
-            raw_data, rem, used = fetch_mainlines(sport_key)
-            st.session_state.raw_events = raw_data
-            st.session_state.api_rem = rem
-            st.session_state.api_used = used
+        if use_mock_data:
+            with st.spinner("Generating sample board (no API call made)..."):
+                st.session_state.raw_events = generate_mock_mainlines(sport_key, now_local)
+                st.session_state.api_rem = "MOCK"
+                st.session_state.api_used = "MOCK"
+        else:
+            with st.spinner("Calling API for live mainline feeds..."):
+                raw_data, rem, used = fetch_mainlines(sport_key)
+                st.session_state.raw_events = raw_data
+                st.session_state.api_rem = rem
+                st.session_state.api_used = used
     except Exception as ex:
         st.error(f"API Connection Failure: {ex}")
 
@@ -975,7 +1131,10 @@ if run_scan or (recalc_only and st.session_state.raw_events):
 
                 bookmakers = list(ev.get("bookmakers", []))
                 if market_scope == "Player and Team Props" and selected_props and event_id:
-                    prop_bms = fetch_event_props(sport_key, event_id, selected_props)
+                    if use_mock_data:
+                        prop_bms = generate_mock_props(sport_key, event_id)
+                    else:
+                        prop_bms = fetch_event_props(sport_key, event_id, selected_props)
                     bookmakers.extend(prop_bms)
 
                 for bm in bookmakers:
@@ -1271,7 +1430,11 @@ with tab_dossiers:
                                     p_fair, p_edge, p_is_priced = compute_fair_and_edge(p_dec, p_prob_entries)
 
                                     # Pull REAL historical Last 5 performance trend
-                                    last_5_metric = fetch_player_last_5(p["description"], p["market"], p.get("point"), sport_key)
+                                    # (sample-mode uses a clearly-labeled placeholder instead of real API calls)
+                                    if use_mock_data:
+                                        last_5_metric = generate_mock_last5(p["description"], p["market"])
+                                    else:
+                                        last_5_metric = fetch_player_last_5(p["description"], p["market"], p.get("point"), sport_key)
 
                                     if not p_is_priced:
                                         evaluated_props.append({
