@@ -289,7 +289,6 @@ def american_to_decimal(us_str: str) -> float:
         return 1.909
 
 def calculate_market_hold(decimal_odds_list: list[float]) -> float:
-    """Calculates bookmaker hold (theoretical margin) as a percentage."""
     valid_dec = [d for d in decimal_odds_list if d and d > 1.0]
     if len(valid_dec) < 2:
         return 0.0
@@ -348,6 +347,42 @@ def log_quick_bet(matchup: str, pick: str, odds: str, stake: float, notes: str):
         st.toast(f"Logged {pick} ({odds}) for ${stake:.2f} CAD!", icon="⚡")
     except Exception as e:
         st.error(f"Sheet write failure: {e}")
+
+# --- ODDS API DISPATCHERS ---
+def fetch_mainlines(sport_key: str):
+    url = f"{BASE_URL}/{sport_key}/odds"
+    params = {
+        "apiKey": ODDS_API_KEY,
+        "regions": "ca,eu",
+        "markets": "h2h,spreads,totals",
+        "oddsFormat": "decimal",
+    }
+    try:
+        res = requests.get(url, params=params, timeout=12)
+        res.raise_for_status()
+        return res.json(), res.headers.get("x-requests-remaining", "N/A"), res.headers.get("x-requests-used", "N/A")
+    except requests.exceptions.RequestException as e:
+        clean_msg = str(e).split("?")[0] if "?" in str(e) else str(e)
+        raise RuntimeError(f"Mainline API error: {clean_msg}")
+
+@st.cache_data(ttl=600, show_spinner=False)
+def fetch_event_props(sport_key: str, event_id: str, prop_markets: tuple):
+    if not prop_markets:
+        return []
+    url = f"{BASE_URL}/{sport_key}/events/{event_id}/odds"
+    params = {
+        "apiKey": ODDS_API_KEY,
+        "regions": "ca,eu",
+        "markets": ",".join(prop_markets),
+        "oddsFormat": "decimal",
+    }
+    try:
+        res = requests.get(url, params=params, timeout=10)
+        if res.status_code == 200:
+            return res.json().get("bookmakers", [])
+        return []
+    except Exception:
+        return []
 
 # --- FREE SCOUTING INTEL & WEATHER ENGINES ---
 @st.cache_data(ttl=7200, show_spinner=False)
@@ -473,18 +508,6 @@ def fetch_espn_sport_intel(sport_slug: str):
     except Exception:
         return {}
 
-def fetch_events_and_odds(sport_key: str, markets_list: list[str]):
-    url = f"{BASE_URL}/{sport_key}/odds"
-    params = {
-        "apiKey": ODDS_API_KEY,
-        "regions": "ca,eu",
-        "markets": ",".join(markets_list),
-        "oddsFormat": "decimal",
-    }
-    res = requests.get(url, params=params, timeout=14)
-    res.raise_for_status()
-    return res.json(), res.headers.get("x-requests-remaining", "N/A"), res.headers.get("x-requests-used", "N/A")
-
 # --- INITIALIZE PERSISTENT STATE ---
 if "api_rem" not in st.session_state:
     st.session_state.api_rem = "---"
@@ -575,12 +598,8 @@ st.markdown(f"""
 # --- SCANNING & CALCULATION ENGINE ---
 if run_scan:
     try:
-        active_markets = ["h2h", "spreads", "totals"]
-        if market_scope == "Player and Team Props":
-            active_markets.extend(SPORT_PROPS_MAP.get(sport_key, []))
-
-        with st.spinner("Calling API for live market feeds..."):
-            raw_data, rem, used = fetch_events_and_odds(sport_key, active_markets)
+        with st.spinner("Calling API for live mainline feeds..."):
+            raw_data, rem, used = fetch_mainlines(sport_key)
             st.session_state.raw_events = raw_data
             st.session_state.api_rem = rem
             st.session_state.api_used = used
@@ -589,7 +608,7 @@ if run_scan:
 
 if run_scan or (recalc_only and st.session_state.raw_events):
     try:
-        with st.spinner("Devigging odds, calculating book holds, and preparing 1-tap bet routing..."):
+        with st.spinner("Devigging odds, requesting event props, and compiling scouting intel..."):
             target_date_str = now_local.strftime("%Y-%m-%d")
             if "Tomorrow" in date_filter_mode and "Day After" not in date_filter_mode:
                 target_date_str = tomorrow_local.strftime("%Y-%m-%d")
@@ -610,6 +629,7 @@ if run_scan or (recalc_only and st.session_state.raw_events):
                 intel_map = {}
 
             compiled = []
+            selected_props = tuple(SPORT_PROPS_MAP.get(sport_key, []))
 
             for ev in st.session_state.raw_events:
                 commence_raw = ev.get("commence_time", "")
@@ -628,6 +648,7 @@ if run_scan or (recalc_only and st.session_state.raw_events):
                 else:
                     continue
 
+                event_id = ev.get("id")
                 away_team = ev.get("away_team", "Away")
                 home_team = ev.get("home_team", "Home")
                 matchup = f"{away_team} @ {home_team}"
@@ -651,7 +672,12 @@ if run_scan or (recalc_only and st.session_state.raw_events):
                 playnow_lines = {}
                 props_data = []
 
-                for bm in ev.get("bookmakers", []):
+                bookmakers = list(ev.get("bookmakers", []))
+                if market_scope == "Player and Team Props" and selected_props and event_id:
+                    prop_bms = fetch_event_props(sport_key, event_id, selected_props)
+                    bookmakers.extend(prop_bms)
+
+                for bm in bookmakers:
                     bm_k = bm.get("key", "").lower()
                     is_sharp = any(k in bm_k for k in SHARP_BENCHMARKS)
 
@@ -700,7 +726,7 @@ if run_scan or (recalc_only and st.session_state.raw_events):
                                         props_data.append(line_dict)
 
                 compiled.append({
-                    "id": ev.get("id", matchup),
+                    "id": event_id or matchup,
                     "matchup": matchup,
                     "away_team": away_team,
                     "home_team": home_team,
@@ -714,7 +740,7 @@ if run_scan or (recalc_only and st.session_state.raw_events):
 
             st.session_state.dossiers = compiled
             if compiled:
-                st.success(f"Loaded {len(compiled)} Matchups with Full Market Hold Analytics!")
+                st.success(f"Loaded {len(compiled)} Matchups with Holds & Scouting Intel!")
             else:
                 st.info("No active games matched your selected schedule.")
     except Exception as ex:
@@ -736,7 +762,6 @@ with tab_dossiers:
             p_lines = g["playnow"]
             s_probs = g["sharp_probs"]
 
-            # Precision mainline selector
             def get_best_line(m_key, side_name):
                 matching = [val for k, val in p_lines.items() if k.startswith(m_key) and side_name in val["name"]]
                 if not matching:
@@ -782,7 +807,6 @@ with tab_dossiers:
             over_tot = get_best_line("totals", "Over")
             under_tot = get_best_line("totals", "Under")
 
-            # Market Hold (Juice) Calculations
             ml_hold = calculate_market_hold([away_ml["dec"], home_ml["dec"]])
             spread_hold = calculate_market_hold([away_spread["dec"], home_spread["dec"]])
             total_hold = calculate_market_hold([over_tot["dec"], under_tot["dec"]])
@@ -796,7 +820,6 @@ with tab_dossiers:
                 top_prob = away_ml["raw_prob"]
                 top_play = f"Back <b>{g['away_team']} ML</b> (Sharp Prob: {away_ml['prob']} | Edge: {away_ml['edge']})"
 
-            # Sport Scouting Layout
             if is_mlb:
                 tape_row_html = f"""<div class="tape-row">
 <div class="scout-card">
@@ -829,7 +852,6 @@ with tab_dossiers:
                 tape_row_html = ""
                 context_summary = f"Venue: <b>{intel.get('venue', 'Arena')}</b>."
 
-            # Dossier Card Markup
             dossier_html = f"""<div class="game-dossier">
 <div class="dossier-header">
 <div>
@@ -867,7 +889,6 @@ with tab_dossiers:
 </tbody>
 </table>"""
 
-            # Optional Player Props Table with Hold & Edge
             if market_scope == "Player and Team Props" and g["props"]:
                 prop_rows_html = ""
                 for p in g["props"][:6]:
@@ -910,7 +931,6 @@ with tab_dossiers:
 </div>"""
             st.markdown(dossier_html, unsafe_allow_html=True)
 
-            # 1-Click Action Bar (Option B: Kelly stake if +EV, Flat Unit if Neutral/Negative)
             st.caption(f"⚡ 1-Click Bet Router for {g['matchup']}")
             c_btn_a, c_btn_b, c_btn_c, c_btn_d = st.columns(4)
 
