@@ -84,12 +84,11 @@ st.markdown("""
         margin-top: 2px;
     }
     .game-dossier {
-        background: linear-gradient(145deg, rgba(15, 23, 42, 0.95) 0%, rgba(11, 15, 25, 0.98) 100%);
-        border: 1px solid #334155;
         border-radius: 14px;
         padding: 16px;
         margin-bottom: 18px;
         box-shadow: 0 8px 20px rgba(0, 0, 0, 0.5);
+        transition: all 0.25s ease-in-out;
     }
     .dossier-header {
         display: flex;
@@ -313,7 +312,7 @@ STADIUM_COORDS = {
     "New Orleans Saints": (29.951, -90.081), "Kansas City Chiefs": (39.048, -94.483),
     "Arizona Cardinals": (33.527, -112.262), "Los Angeles Chargers": (33.953, -118.338),
     "Minnesota Vikings": (44.973, -93.257), "Green Bay Packers": (44.501, -88.062),
-    "Pittsburgh Pirates": (40.446, -80.005)
+    "Pittsburgh Steelers": (40.446, -80.015), "Pittsburgh Pirates": (40.446, -80.005)
 }
 
 # --- MATHEMATICAL ENGINES ---
@@ -592,7 +591,7 @@ market_scope = st.sidebar.radio(
     key="market_scope_radio"
 )
 
-only_pos_ev = st.sidebar.checkbox("🎯 Highlight Only +EV Actionable Games", value=False, help="Hides games where every side has negative edge")
+only_pos_ev = st.sidebar.checkbox("🎯 Highlight & Filter +EV Games", value=False, help="Unchecked: Shows all games with green/red odds. Checked: Highlights +EV games with a luminous green border and dims negative-edge cards.")
 
 now_local = datetime.now(LOCAL_TZ)
 tomorrow_local = (now_local + timedelta(days=1)).date()
@@ -885,8 +884,15 @@ with tab_dossiers:
             all_edges = [away_ml["edge_raw"], home_ml["edge_raw"], away_spread["edge_raw"], home_spread["edge_raw"], over_tot["edge_raw"], under_tot["edge_raw"]]
             has_pos_ev = any(e > 0.5 for e in all_edges if e > -90)
 
-            if only_pos_ev and not has_pos_ev:
-                continue
+            # Highlighting and dimming logic: Keeps all games visible
+            if only_pos_ev:
+                card_border = "2px solid #10b981" if has_pos_ev else "1px solid #1e293b"
+                card_opacity = "1.0" if has_pos_ev else "0.45"
+                card_glow = "box-shadow: 0 0 18px rgba(16, 185, 129, 0.35);" if has_pos_ev else "box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);"
+            else:
+                card_border = "1px solid #334155"
+                card_opacity = "1.0"
+                card_glow = "box-shadow: 0 8px 20px rgba(0, 0, 0, 0.5);"
 
             rendered_count += 1
             ml_hold = calculate_market_hold([away_ml["dec"], home_ml["dec"]])
@@ -944,7 +950,8 @@ with tab_dossiers:
                 tape_row_html = ""
                 context_summary = f"Venue: <b>{intel.get('venue', 'Arena')}</b>."
 
-            dossier_html = f"""<div class="game-dossier">
+            # Dossier wrapper with dynamic opacity, border highlight and glow
+            dossier_html = f"""<div class="game-dossier" style="background: linear-gradient(145deg, rgba(15, 23, 42, 0.95) 0%, rgba(11, 15, 25, 0.98) 100%); border: {card_border}; opacity: {card_opacity}; {card_glow}">
 <div class="dossier-header">
 <div>
 <div class="matchup-headline">{g['matchup']} &nbsp;{verdict_badge}</div>
@@ -989,7 +996,6 @@ with tab_dossiers:
                 if g["props"]:
                     st.markdown("<div style='font-size: 13px; font-weight: 800; color: #38bdf8; margin: 8px 0 6px 0;'>🎯 Categorized Player Prop Intelligence</div>", unsafe_allow_html=True)
 
-                    # Group props into distinct sports categories
                     cat_map = {
                         "Passing / Pitching": ["pass_yds", "pass_tds", "strikeouts"],
                         "Rushing": ["rush_yds"],
@@ -997,7 +1003,6 @@ with tab_dossiers:
                         "Anytime TD / Scoring": ["anytime_td", "points"]
                     }
 
-                    # Filter available categories
                     active_cats = {}
                     for cat_name, sub_keys in cat_map.items():
                         c_props = [p for p in g["props"] if any(k in p["market"].lower() for k in sub_keys)]
@@ -1031,7 +1036,6 @@ with tab_dossiers:
                                 evaluated_props.sort(key=lambda x: x["edge"], reverse=True)
                                 top_p = evaluated_props[0]
 
-                                # Highlight top-quality bet in this category
                                 top_edge_badge = f"+{top_p['edge']:.1f}%" if top_p['edge'] >= 0 else f"{top_p['edge']:.1f}%"
                                 st.markdown(f"""
                                 <div class="top-pick-banner">
@@ -1040,7 +1044,6 @@ with tab_dossiers:
                                 </div>
                                 """, unsafe_allow_html=True)
 
-                                # Render table for this category
                                 p_table_rows = ""
                                 for p in evaluated_props[:6]:
                                     pt_lbl = f"{p['point']}" if p['point'] is not None else ""
@@ -1077,7 +1080,7 @@ with tab_dossiers:
 
             st.markdown(f"""<div class="intel-box">
             💡 <b>System Intelligence & Recommendation:</b> Game Time: <b>{g['time']} SK</b>. {context_summary} <b>Verdict:</b> {top_play}.
-            </div>""", unsafe_allow_html=True)
+            </div></div>""", unsafe_allow_html=True)
 
             # 1-Click Action Bar
             st.caption(f"⚡ 1-Click Bet Router for {g['matchup']}")
@@ -1105,8 +1108,6 @@ with tab_dossiers:
 
             st.markdown("---")
 
-        if only_pos_ev and rendered_count == 0:
-            st.info("No games currently have mathematical positive edge (+EV) against Pinnacle sharp devigged benchmarks.")
     else:
         st.info("Click '⚡ Scan Board' in the sidebar to populate active game dossiers.")
 
@@ -1124,7 +1125,7 @@ with tab_parlays:
                     prob_list = g["sharp_probs"].get(k, [])
                     fair_p = float(np.mean(prob_list)) if prob_list else (1.0 / val["price"])
                     edge_calc = ((val["price"] * fair_p) - 1.0) * 100
-                    if fair_p >= 0.45 or val["price"] <= 1.45:  # Includes high-probability floor legs
+                    if fair_p >= 0.45 or val["price"] <= 1.45:
                         leg_tag = "Floor Leg" if val["price"] <= 1.45 else "Standard Leg"
                         candidate_legs.append({
                             "game_id": g["id"],
@@ -1160,7 +1161,7 @@ with tab_parlays:
             is_correlated = len(game_ids) != len(set(game_ids))
 
             if is_correlated:
-                st.warning("⚠️ Same-Game Correlation Warning: Multiple legs from the same game detected. PlayNow applies dynamic SGP covariance.")
+                st.warning("⚠️ Same-Game Correlation Warning: Detected multiple legs from the same game. PlayNow applies custom SGP covariance.")
 
             total_dec = 1.0
             joint_prob = 1.0
@@ -1174,7 +1175,7 @@ with tab_parlays:
             p_final_stake = parlay_kelly if parlay_kelly > 0 else flat_unit
             parlay_color = "#10b981" if parlay_edge >= 0 else "#f87171"
 
-            st.markdown(f"""<div class="game-dossier" style="border: 2px solid {parlay_color};">
+            st.markdown(f"""<div class="game-dossier" style="background: rgba(15, 23, 42, 0.95); border: 2px solid {parlay_color};">
 <div class="matchup-headline">Combined Multi-Leg Ticket ({parlay_us})</div>
 <div style="font-size: 12px; color: #94a3b8; margin-bottom: 10px;">{' + '.join([c['pick'] for c in chosen])}</div>
 <div class="tape-row">
