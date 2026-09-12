@@ -88,7 +88,6 @@ st.markdown("""
         padding: 16px;
         margin-bottom: 18px;
         box-shadow: 0 8px 20px rgba(0, 0, 0, 0.5);
-        transition: all 0.25s ease-in-out;
     }
     .dossier-header {
         display: flex;
@@ -288,6 +287,30 @@ SPORT_PROPS_MAP = {
     "icehockey_nhl": ["player_points", "player_shots_on_goal"]
 }
 
+# Accurate Sport-Specific Category Groupings
+SPORT_SPECIFIC_CATEGORIES = {
+    "americanfootball_nfl": {
+        "🏈 Passing Yards & TDs": ["pass_yds", "pass_tds"],
+        "🏃 Rushing Yards": ["rush_yds"],
+        "🎯 Receiving Yards & Catches": ["reception_yds", "receptions"],
+        "⚡ Anytime Touchdown": ["anytime_td"]
+    },
+    "baseball_mlb": {
+        "⚾ Pitcher Strikeouts": ["strikeouts"],
+        "🏏 Hits & Total Bases": ["batter_hits"],
+        "🚀 Home Runs": ["home_runs"]
+    },
+    "basketball_nba": {
+        "🏀 Points": ["points"],
+        "📊 Rebounds": ["rebounds"],
+        "🎁 Assists": ["assists"]
+    },
+    "icehockey_nhl": {
+        "🏒 Goals & Points": ["points"],
+        "🎯 Shots on Goal": ["shots_on_goal"]
+    }
+}
+
 INDOOR_VENUES = {
     "Detroit Lions": "Dome (Ford Field)", "New Orleans Saints": "Dome (Caesars Superdome)",
     "Minnesota Vikings": "Dome (U.S. Bank Stadium)", "Las Vegas Raiders": "Dome (Allegiant Stadium)",
@@ -312,7 +335,8 @@ STADIUM_COORDS = {
     "New Orleans Saints": (29.951, -90.081), "Kansas City Chiefs": (39.048, -94.483),
     "Arizona Cardinals": (33.527, -112.262), "Los Angeles Chargers": (33.953, -118.338),
     "Minnesota Vikings": (44.973, -93.257), "Green Bay Packers": (44.501, -88.062),
-    "Pittsburgh Steelers": (40.446, -80.015), "Pittsburgh Pirates": (40.446, -80.005)
+    "Pittsburgh Steelers": (40.446, -80.015), "Pittsburgh Pirates": (40.446, -80.005),
+    "Philadelphia Eagles": (39.901, -75.167), "Washington Commanders": (38.907, -76.864)
 }
 
 # --- MATHEMATICAL ENGINES ---
@@ -591,7 +615,7 @@ market_scope = st.sidebar.radio(
     key="market_scope_radio"
 )
 
-only_pos_ev = st.sidebar.checkbox("🎯 Highlight & Filter +EV Games", value=False, help="Unchecked: Shows all games with green/red odds. Checked: Highlights +EV games with a luminous green border and dims negative-edge cards.")
+only_pos_ev = st.sidebar.checkbox("🎯 Highlight +EV Value Plays", value=False, help="Adds a green glow and clear border to games that have a positive mathematical edge.")
 
 now_local = datetime.now(LOCAL_TZ)
 tomorrow_local = (now_local + timedelta(days=1)).date()
@@ -824,7 +848,6 @@ with tab_dossiers:
             p_lines = g["playnow"]
             s_probs = g["sharp_probs"]
 
-            # Precision mainline selector with bugfix for false positive greens
             def get_best_line(m_key, side_name):
                 matching = [val for k, val in p_lines.items() if k.startswith(m_key) and side_name in val["name"]]
                 if not matching:
@@ -842,15 +865,13 @@ with tab_dossiers:
                 k_ident = best_item["ident"]
                 prob_list = s_probs.get(k_ident, [])
 
-                # Bugfix: If no exact sharp benchmark exists, do not default to 0% edge (which turned green).
                 if prob_list:
                     fair_p = float(np.mean(prob_list))
                     edge_val = ((dec * fair_p) - 1.0) * 100
-                    # Strict threshold: Must be genuinely positive EV to turn green
                     color_cls = "color-good" if edge_val > 0.5 else "color-bad"
                 else:
                     fair_p = 1.0 / dec
-                    edge_val = -4.5  # Realistic vig haircut
+                    edge_val = -4.5
                     color_cls = "color-bad"
 
                 pt_str = f" ({best_item['point']:+})" if best_item['point'] is not None else ""
@@ -884,14 +905,12 @@ with tab_dossiers:
             all_edges = [away_ml["edge_raw"], home_ml["edge_raw"], away_spread["edge_raw"], home_spread["edge_raw"], over_tot["edge_raw"], under_tot["edge_raw"]]
             has_pos_ev = any(e > 0.5 for e in all_edges if e > -90)
 
-            # Highlighting and dimming logic: Keeps all games visible
-            if only_pos_ev:
-                card_border = "2px solid #10b981" if has_pos_ev else "1px solid #1e293b"
-                card_opacity = "1.0" if has_pos_ev else "0.45"
-                card_glow = "box-shadow: 0 0 18px rgba(16, 185, 129, 0.35);" if has_pos_ev else "box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);"
+            # Fix: Never dim or darken cards. All cards stay 100% visible and bright.
+            if only_pos_ev and has_pos_ev:
+                card_border = "2px solid #10b981"
+                card_glow = "box-shadow: 0 0 20px rgba(16, 185, 129, 0.4);"
             else:
                 card_border = "1px solid #334155"
-                card_opacity = "1.0"
                 card_glow = "box-shadow: 0 8px 20px rgba(0, 0, 0, 0.5);"
 
             rendered_count += 1
@@ -950,8 +969,8 @@ with tab_dossiers:
                 tape_row_html = ""
                 context_summary = f"Venue: <b>{intel.get('venue', 'Arena')}</b>."
 
-            # Dossier wrapper with dynamic opacity, border highlight and glow
-            dossier_html = f"""<div class="game-dossier" style="background: linear-gradient(145deg, rgba(15, 23, 42, 0.95) 0%, rgba(11, 15, 25, 0.98) 100%); border: {card_border}; opacity: {card_opacity}; {card_glow}">
+            # Dossier wrapper with 100% full brightness and crisp readability
+            dossier_html = f"""<div class="game-dossier" style="background: linear-gradient(145deg, rgba(15, 23, 42, 0.95) 0%, rgba(11, 15, 25, 0.98) 100%); border: {card_border}; opacity: 1.0; {card_glow}">
 <div class="dossier-header">
 <div>
 <div class="matchup-headline">{g['matchup']} &nbsp;{verdict_badge}</div>
@@ -991,23 +1010,17 @@ with tab_dossiers:
             # Render dossier container
             st.markdown(dossier_html, unsafe_allow_html=True)
 
-            # Categorized Player Props with Category Tabs and Top-Bet Highlights
+            # Sport-Specific Categorized Props
             if market_scope == "Player and Team Props":
                 if g["props"]:
                     st.markdown("<div style='font-size: 13px; font-weight: 800; color: #38bdf8; margin: 8px 0 6px 0;'>🎯 Categorized Player Prop Intelligence</div>", unsafe_allow_html=True)
 
-                    cat_map = {
-                        "Passing / Pitching": ["pass_yds", "pass_tds", "strikeouts"],
-                        "Rushing": ["rush_yds"],
-                        "Receiving / Hitting": ["reception_yds", "receptions", "batter_hits", "home_runs"],
-                        "Anytime TD / Scoring": ["anytime_td", "points"]
-                    }
-
+                    active_sport_categories = SPORT_SPECIFIC_CATEGORIES.get(sport_key, {})
                     active_cats = {}
-                    for cat_name, sub_keys in cat_map.items():
+                    for cat_label, sub_keys in active_sport_categories.items():
                         c_props = [p for p in g["props"] if any(k in p["market"].lower() for k in sub_keys)]
                         if c_props:
-                            active_cats[cat_name] = c_props
+                            active_cats[cat_label] = c_props
 
                     if active_cats:
                         prop_tabs = st.tabs(list(active_cats.keys()))
@@ -1161,7 +1174,7 @@ with tab_parlays:
             is_correlated = len(game_ids) != len(set(game_ids))
 
             if is_correlated:
-                st.warning("⚠️ Same-Game Correlation Warning: Detected multiple legs from the same game. PlayNow applies custom SGP covariance.")
+                st.warning("⚠️ Same-Game Correlation Warning: Multiple legs from the same game detected. PlayNow applies dynamic SGP covariance.")
 
             total_dec = 1.0
             joint_prob = 1.0
