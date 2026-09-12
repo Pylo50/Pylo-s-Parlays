@@ -294,6 +294,35 @@ st.markdown("""
         margin: 6px 0 10px 0;
         font-size: 12px;
     }
+    .legend-box {
+        background: rgba(15, 23, 42, 0.85);
+        border: 1px solid #334155;
+        border-radius: 8px;
+        padding: 10px 12px;
+        margin-bottom: 14px;
+    }
+    .legend-title {
+        font-size: 11px;
+        font-weight: 800;
+        text-transform: uppercase;
+        letter-spacing: 0.6px;
+        color: #38bdf8;
+        margin-bottom: 6px;
+    }
+    .legend-row {
+        margin-bottom: 6px;
+        line-height: 1.35;
+    }
+    .legend-term {
+        font-size: 11.5px;
+        font-weight: 800;
+        color: #ffffff;
+        font-family: 'JetBrains Mono', monospace;
+    }
+    .legend-def {
+        font-size: 11px;
+        color: #94a3b8;
+    }
 </style>
 """, unsafe_allow_html=True)
 
@@ -507,11 +536,28 @@ def generate_mock_props(sport_key: str, event_id: str):
         {"key": "playnow", "title": "PlayNow SK", "markets": playnow_markets},
     ]
 
-def generate_mock_last5(player_name: str, prop_market: str) -> str:
-    """Deterministic placeholder Last-5 for UI testing only — clearly a
-    sample-mode value, never mixed with real data."""
-    seed = sum(ord(c) for c in (player_name + prop_market)) % 6
-    return f"Last 5: {seed}/5 Over (Sample)"
+MOCK_OPPONENTS = {
+    "baseball_mlb": ["BOS", "TB", "TOR", "BAL", "NYY"],
+    "americanfootball_nfl": ["SEA", "LAR", "ARI", "SF", "NO"],
+    "basketball_nba": ["MIA", "NYK", "PHI", "MIL", "CLE"],
+    "icehockey_nhl": ["MTL", "OTT", "BOS", "TB", "NYR"],
+}
+
+def generate_mock_last5(player_name: str, prop_market: str, line_point, sport_key: str) -> str:
+    """Deterministic sample last-5 numbers (clearly marked Sample) for UI
+    testing — a realistic spread of per-game numbers around the given line,
+    each tagged with a fake opponent, in the same format real data uses."""
+    stat_label = _stat_label_for_market(prop_market)
+    opponents = MOCK_OPPONENTS.get(sport_key, ["OPP"])
+    seed = sum(ord(c) for c in (player_name + prop_market))
+    base = float(line_point) if line_point else 5.0
+    parts = []
+    for i in range(5):
+        wiggle = ((seed + i * 7) % 9) - 4  # deterministic swing, roughly +/-4
+        val = max(0, round(base + wiggle, 1))
+        val_str = f"{val:g}"
+        parts.append(f"{val_str} vs {opponents[i % len(opponents)]}")
+    return f"Last 5 {stat_label} (Sample): " + ", ".join(parts)
 
 # --- MATHEMATICAL ENGINES ---
 def decimal_to_american(dec: float) -> str:
@@ -682,6 +728,27 @@ _PROP_STAT_MAP = {
     "shots_on_goal": (None, None, "shotsOnGoal"),
 }
 
+STAT_DISPLAY_LABEL = {
+    "strikeouts": "K",
+    "batter_home_runs": "HR",
+    "batter_hits": "Hits",
+    "pass_yds": "Pass Yds",
+    "rush_yds": "Rush Yds",
+    "reception_yds": "Rec Yds",
+    "receptions": "Rec",
+    "player_points": "Pts",
+    "rebounds": "Reb",
+    "assists": "Ast",
+    "shots_on_goal": "SOG",
+}
+
+def _stat_label_for_market(prop_market: str) -> str:
+    key = prop_market.lower()
+    for frag, label in STAT_DISPLAY_LABEL.items():
+        if frag in key:
+            return label
+    return "Stat"
+
 def _resolve_prop_stat(prop_market: str):
     key = prop_market.lower()
     for frag, mapping in _PROP_STAT_MAP.items():
@@ -746,34 +813,40 @@ def _espn_last5_gamelog(athlete_id: str, sport_slug: str):
 
 def fetch_player_last_5(player_name: str, prop_market: str, line_point: float, sport: str = "americanfootball_nfl"):
     """
-    Returns REAL last-5-game hit-rate for the given player/prop line, computed
-    from live game logs. If the player or stat cannot be verified, this
-    returns an explicit 'No verified data' string rather than a guessed number.
-    Never fabricates a hit rate.
+    Returns the player's ACTUAL last-5-game numbers for the relevant stat,
+    each tagged with the opponent faced, e.g.:
+    'Last 5 Rush Yds: 92 vs SEA, 61 vs LAR, 110 vs ARI, 45 vs SF, 78 vs NO'
+    Never fabricates numbers — returns an explicit 'No verified data' string
+    if the player or stat cannot be confirmed against a live source.
     """
-    if not player_name or line_point is None:
-        return "Last 5: No verified data"
+    if not player_name:
+        return "No verified data"
 
     stat_group, mlb_field, espn_field = _resolve_prop_stat(prop_market)
+    stat_label = _stat_label_for_market(prop_market)
 
     try:
         if "baseball" in sport and mlb_field:
             pid = _mlb_player_id(player_name)
             if not pid:
-                return "Last 5: No verified data"
+                return "No verified data"
             season = datetime.now().year
             games = _mlb_last5_gamelog(pid, stat_group, season)
             if not games:
                 # try previous season if current season has no logged games yet
                 games = _mlb_last5_gamelog(pid, stat_group, season - 1)
             if not games:
-                return "Last 5: No verified data"
-            hits = 0
+                return "No verified data"
+            parts = []
             for g in games:
                 stat_val = g.get("stat", {}).get(mlb_field, None)
-                if stat_val is not None and float(stat_val) > float(line_point):
-                    hits += 1
-            return f"Last 5: {hits}/{len(games)} Over"
+                if stat_val is None:
+                    continue
+                opp = g.get("opponent", {}).get("abbreviation") or g.get("opponent", {}).get("name", "")
+                parts.append(f"{stat_val}{' vs ' + opp if opp else ''}")
+            if not parts:
+                return "No verified data"
+            return f"Last 5 {stat_label}: " + ", ".join(parts)
 
         elif espn_field:
             slug_map = {
@@ -783,22 +856,20 @@ def fetch_player_last_5(player_name: str, prop_market: str, line_point: float, s
             }
             sport_slug = slug_map.get(sport)
             if not sport_slug:
-                return "Last 5: No verified data"
+                return "No verified data"
             aid = _espn_athlete_id(player_name, sport_slug)
             if not aid:
-                return "Last 5: No verified data"
+                return "No verified data"
             games = _espn_last5_gamelog(aid, sport_slug)
             if not games:
-                return "Last 5: No verified data"
-            hits = 0
-            counted = 0
+                return "No verified data"
+            parts = []
             for g in games:
                 stats = g.get("stats", [])
-                # ESPN returns stats as a list aligned to labeled categories;
-                # without a reliable label map we can't safely extract a single
-                # field, so we conservatively only count games we can parse.
-                val = None
                 labels = g.get("labels", [])
+                opp_obj = g.get("opponent", {})
+                opp = opp_obj.get("abbreviation", "") if isinstance(opp_obj, dict) else ""
+                val = None
                 if espn_field in labels:
                     idx = labels.index(espn_field)
                     if idx < len(stats):
@@ -807,16 +878,15 @@ def fetch_player_last_5(player_name: str, prop_market: str, line_point: float, s
                         except (TypeError, ValueError):
                             val = None
                 if val is not None:
-                    counted += 1
-                    if val > float(line_point):
-                        hits += 1
-            if counted == 0:
-                return "Last 5: No verified data"
-            return f"Last 5: {hits}/{counted} Over"
+                    val_str = f"{val:g}"
+                    parts.append(f"{val_str}{' vs ' + opp if opp else ''}")
+            if not parts:
+                return "No verified data"
+            return f"Last 5 {stat_label}: " + ", ".join(parts)
 
-        return "Last 5: No verified data"
+        return "No verified data"
     except Exception:
-        return "Last 5: No verified data"
+        return "No verified data"
 
 # --- SCOUTING INTEL & WEATHER ENGINES ---
 @st.cache_data(ttl=7200, show_spinner=False)
@@ -961,6 +1031,19 @@ if "odds_history" not in st.session_state:
 # --- SIDEBAR CONTROLS ---
 st.sidebar.markdown("<h3 style='color:#fff;'>⚡ PYLOS TERMINAL</h3>", unsafe_allow_html=True)
 st.sidebar.caption("Benchmark: **Pinnacle / Sharp Consensus** | Target: **PlayNow SK**")
+
+st.sidebar.markdown("""
+<div class="legend-box">
+<div class="legend-title">📖 Terms Legend</div>
+<div class="legend-row"><span class="legend-term">Fair Probability</span><br><span class="legend-def">The sharp-book (Pinnacle-weighted) consensus win chance, with bookmaker vig removed. This is the "true" price.</span></div>
+<div class="legend-row"><span class="legend-term">True Edge %</span><br><span class="legend-def">How much better (or worse) PlayNow's price is than Fair Probability implies. +2% means you're getting paid 2% more than the fair value — a real mathematical advantage. Negative means you're overpaying.</span></div>
+<div class="legend-row"><span class="legend-term">Hold %</span><br><span class="legend-def">The bookmaker's built-in profit margin on a market. Higher hold = harder to find value there.</span></div>
+<div class="legend-row"><span class="legend-term">Kelly Stake</span><br><span class="legend-def">Suggested wager size, scaled to your bankroll and edge, at your chosen Kelly risk tier.</span></div>
+<div class="legend-row"><span class="legend-term">Unpriced</span><br><span class="legend-def">No sharp book has this market quoted yet. Edge is genuinely unknown — this is NOT the same as a bad bet.</span></div>
+<div class="legend-row"><span class="legend-term">▲ Drift / ▼ Steam</span><br><span class="legend-def">Drift = price got worse since last scan. Steam = price got better (often follows sharp money).</span></div>
+<div class="legend-row"><span class="legend-term">Last 5</span><br><span class="legend-def">The player's actual result in each of their last 5 games, with opponent — not a guess.</span></div>
+</div>
+""", unsafe_allow_html=True)
 
 selected_sport_label = st.sidebar.selectbox("Sport Slate", ["🏈 NFL Football", "⚾ MLB Baseball", "🏀 NBA Basketball", "🏒 NHL Hockey"], key="sport_slate_select")
 sport_map = {
@@ -1146,11 +1229,32 @@ if run_scan or (recalc_only and st.session_state.raw_events):
                         outcomes = m.get("outcomes", [])
                         valid_outcomes = [o for o in outcomes if o.get("price", 0) > 1.0]
 
-                        if len(valid_outcomes) >= 2:
-                            raw_p_list = [1.0 / o["price"] for o in valid_outcomes]
+                        # CRITICAL: player-prop markets pack every player's Over/Under
+                        # into one flat outcomes list (e.g. McCaffrey Over, McCaffrey
+                        # Under, Barkley Over, Barkley Under all under one "key"). If we
+                        # devig that whole list together, the math forces all outcomes
+                        # to sum to 100% as if they were one market — silently diluting
+                        # each individual player's fair probability. We must only devig
+                        # outcomes that belong to the SAME player + line together.
+                        has_player_desc = any(o.get("description") for o in valid_outcomes)
+                        if has_player_desc:
+                            grouped = {}
+                            for o in valid_outcomes:
+                                gkey = (o.get("description", ""), o.get("point"))
+                                grouped.setdefault(gkey, []).append(o)
+                            outcome_groups = list(grouped.values())
+                        else:
+                            # Team markets (h2h/spreads/totals) already form one
+                            # coherent market — devig as a whole (unchanged behavior).
+                            outcome_groups = [valid_outcomes]
+
+                        for group_outcomes in outcome_groups:
+                            if len(group_outcomes) < 2:
+                                continue
+                            raw_p_list = [1.0 / o["price"] for o in group_outcomes]
                             devigged = power_devig(raw_p_list)
 
-                            for idx, o in enumerate(valid_outcomes):
+                            for idx, o in enumerate(group_outcomes):
                                 player_desc = o.get("description", "")
                                 point_val = o.get("point", None)
                                 ident = f"{m_key}_{player_desc}_{o['name']}_{point_val}"
@@ -1224,6 +1328,7 @@ with tab_dossiers:
         spread_label = "Run Line" if is_mlb else ("Puck Line" if is_nhl else "Point Spread")
 
         rendered_count = 0
+        global_best_bets = {}  # category label -> list of priced bets, for the Top 20 board at the end
         for idx_g, g in enumerate(st.session_state.dossiers):
             intel = g["intel"]
             p_lines = g["playnow"]
@@ -1293,6 +1398,25 @@ with tab_dossiers:
             home_spread = get_best_line("spreads", g["home_team"])
             over_tot = get_best_line("totals", "Over")
             under_tot = get_best_line("totals", "Under")
+
+            for line, cat, desc in [
+                (away_ml, "Moneyline", f"{g['away_team']} ML"),
+                (home_ml, "Moneyline", f"{g['home_team']} ML"),
+                (away_spread, "Spread", f"{g['away_team']}{away_spread['point']}"),
+                (home_spread, "Spread", f"{g['home_team']}{home_spread['point']}"),
+                (over_tot, "Total", f"Over{over_tot['point']}"),
+                (under_tot, "Total", f"Under{under_tot['point']}"),
+            ]:
+                if line["edge_raw"] is not None:
+                    global_best_bets.setdefault(cat, []).append({
+                        "matchup": g["matchup"],
+                        "pick": desc,
+                        "odds": line["odds"],
+                        "fair": line["prob"],
+                        "edge_raw": line["edge_raw"],
+                        "edge_label": line["edge"],
+                        "kelly": line["kelly"],
+                    })
 
             all_lines = [away_ml, home_ml, away_spread, home_spread, over_tot, under_tot]
             priced_edges = [l["edge_raw"] for l in all_lines if l["edge_raw"] is not None]
@@ -1432,7 +1556,7 @@ with tab_dossiers:
                                     # Pull REAL historical Last 5 performance trend
                                     # (sample-mode uses a clearly-labeled placeholder instead of real API calls)
                                     if use_mock_data:
-                                        last_5_metric = generate_mock_last5(p["description"], p["market"])
+                                        last_5_metric = generate_mock_last5(p["description"], p["market"], p.get("point"), sport_key)
                                     else:
                                         last_5_metric = fetch_player_last_5(p["description"], p["market"], p.get("point"), sport_key)
 
@@ -1459,6 +1583,15 @@ with tab_dossiers:
                                         "color_cls": "color-good" if p_edge > 0.5 else "color-bad",
                                         "edge_label": f"{p_edge:+.1f}%",
                                         "fair_label": f"{p_fair*100:.1f}%"
+                                    })
+                                    global_best_bets.setdefault(c_name, []).append({
+                                        "matchup": g["matchup"],
+                                        "pick": f"{p['description']} {p['name']} {p.get('point', '')}",
+                                        "odds": decimal_to_american(p_dec),
+                                        "fair": f"{p_fair*100:.1f}%",
+                                        "edge_raw": p_edge,
+                                        "edge_label": f"{p_edge:+.1f}%",
+                                        "kelly": f"${(k_stake if k_stake > 0 else flat_unit):.2f}",
                                     })
 
                                 # Sort priced props by edge (desc); push unpriced to the bottom.
@@ -1543,6 +1676,31 @@ with tab_dossiers:
                     log_quick_bet(g["matchup"], f"Under {under_tot['point']}", under_tot["odds"], under_tot["k_stake"], f"Edge: {under_tot['edge']} | Hold: {total_hold}%")
 
             st.markdown("---")
+
+        # --- TOP 20 BEST BETS BY CATEGORY (aggregated across the whole scanned board) ---
+        if global_best_bets:
+            st.markdown("## 🏆 Top Value Board — Best Bets by Category")
+            st.caption("Every priced bet across all scanned games, ranked by True Edge %. Unpriced markets are excluded (no verified fair value to rank them by).")
+            for cat_name, bets in global_best_bets.items():
+                bets_sorted = sorted(bets, key=lambda b: b["edge_raw"], reverse=True)[:20]
+                with st.expander(f"{cat_name} — Top {len(bets_sorted)}", expanded=False):
+                    rows = ""
+                    for b in bets_sorted:
+                        color = "color-good" if b["edge_raw"] > 0.5 else "color-bad"
+                        rows += f"""<tr>
+                        <td style="text-align:left;">{b['matchup']}</td>
+                        <td style="text-align:left;"><b>{b['pick']}</b></td>
+                        <td>{b['odds']}</td>
+                        <td>{b['fair']}</td>
+                        <td><span class="{color}">{b['edge_label']}</span></td>
+                        <td><span class="highlight-kelly">{b['kelly']}</span></td>
+                        </tr>"""
+                    st.markdown(f"""
+                    <table class="market-table">
+                    <thead><tr><th>Matchup</th><th>Pick</th><th>Odds</th><th>Fair %</th><th>True Edge</th><th>Wager</th></tr></thead>
+                    <tbody>{rows}</tbody>
+                    </table>
+                    """, unsafe_allow_html=True)
 
     else:
         st.info("Click '⚡ Scan Board' in the sidebar to populate active game dossiers.")
